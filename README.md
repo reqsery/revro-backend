@@ -231,8 +231,10 @@ Automated emails are sent for:
 
 4. **Add Environment Variables**
    - Click "Environment Variables"
-   - Add all variables from your `.env.local` file
-   - Make sure to include both `SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_URL`
+   - Add all variables from `.env.example` file
+   - Required variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `RESEND_API_KEY`, `NODE_ENV`
+   - Optional now (add later): `CLAUDE_API_KEY`, `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`
+   - Make sure both `SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_URL` are set to the same value
 
 5. **Deploy**
    - Click Deploy
