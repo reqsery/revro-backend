@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { sendWelcomeEmail } from '@/lib/email';
+import { fireResendEvent } from '@/lib/resend';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -101,8 +102,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Send welcome email (don't block signup if it fails)
+    // Fire Resend events and welcome email — fire-and-forget, never block signup
 const userName = displayName || email.split('@')[0];
+
+void fireResendEvent('user.signed_up', email, userName, {
+  first_name: userName,
+});
+
 console.log('About to send welcome email to:', email);
 sendWelcomeEmail(email, userName, apiKey)
   .then(result => console.log('Email send result:', result))
