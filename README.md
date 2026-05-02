@@ -56,7 +56,7 @@ CLAUDE_API_KEY=your_anthropic_api_key
 RESEND_API_KEY=your_resend_api_key
 
 # Plugin Server
-PLUGIN_SERVER_URL=your_railway_plugin_server_url
+PLUGIN_SERVER_URL=PLUGIN_SERVER_URL=https://revro-backend.onrender.com
 PLUGIN_SHARED_SECRET=your_64_char_hex_secret
 
 # Sentry (optional)
@@ -71,7 +71,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 1. Clone the repository
 
 ```bash
-git clone https://gitlab.com/revro1/revro-backend.git
+github.com/reqsery/revro-backend
 cd revro-backend/revro-nextjs-backend
 ```
 
@@ -181,9 +181,9 @@ Automated emails are sent for:
 
 Build settings: Framework: Next.js, Build command: `npm run build`, Output: `.next`
 
-### Railway (Plugin Server)
+### Render (Plugin Server)
 
-1. Create a Railway project
+1. Create a Render project
 2. Connect via Railway CLI or GitHub
 3. Add environment variables
 4. Deploy
