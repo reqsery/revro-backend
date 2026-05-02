@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.local
+.env.production
+.env.sentry-build-plugin
+.DS_Store
+dist/
+build/
+.vercel
+.next/
+*.log
