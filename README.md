@@ -27,7 +27,7 @@ AI-powered platform for Roblox and Discord creators. Generate scripts, UI elemen
 - **AI:** Anthropic Claude API (Sonnet 4.5, 4.6, Opus 4.6)
 - **Email:** Resend
 - **Hosting:** Vercel
-- **Plugin Server:** Node.js (deployed on Railway)
+- **Plugin Server:** Node.js (deployed on Render)
 
 ## Prerequisites
 
