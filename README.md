@@ -56,7 +56,7 @@ CLAUDE_API_KEY=your_anthropic_api_key
 RESEND_API_KEY=your_resend_api_key
 
 # Plugin Server
-PLUGIN_SERVER_URL=PLUGIN_SERVER_URL=https://your-app.onrender.com
+PLUGIN_SERVER_URL=https://your-app.onrender.com
 PLUGIN_SHARED_SECRET=your_64_char_hex_secret
 
 # Sentry (optional)
