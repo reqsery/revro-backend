@@ -27,8 +27,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // Support both old (message/conversationId) and new (prompt/conversation_id) field names
-    const prompt: string       = body.prompt ?? body.message ?? ''
-    const conversationId: string | undefined = body.conversation_id ?? body.conversationId
+    const prompt: string  = body.prompt ?? body.message ?? ''
+    const guildId: string = body.guild_id ?? ''
+    const guildName: string = body.guild_name ?? ''
+    const rawConvId: string | undefined = body.conversation_id ?? body.conversationId
+    const conversationId = rawConvId && !rawConvId.startsWith('local_') ? rawConvId : undefined
 
     if (!prompt) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
@@ -50,7 +53,12 @@ export async function POST(request: NextRequest) {
 
     const cost = CREDIT_COSTS.PLANNING
 
-    const aiResponse  = await callClaude(actualModel, prompt, 'discord', history)
+    // Prepend guild context to the prompt so the AI tailors advice to that server
+    const fullPrompt = guildName
+      ? `[Setting up Discord server: "${guildName}" (ID: ${guildId})]\n\n${prompt}`
+      : prompt
+
+    const aiResponse  = await callClaude(actualModel, fullPrompt, 'discord', history)
     const creditResult = await deductCredits(user.id, cost, 'discord_generation', {
       model: planModel,
       actualModel,

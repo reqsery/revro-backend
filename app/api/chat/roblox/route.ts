@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
+import { deductCredits, tokensToCreditCost, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
 import { callClaude, streamClaude, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -8,7 +8,6 @@ export const dynamic = 'force-dynamic';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Refine a user's asset description into a DALL-E-ready prompt using Claude. */
 async function refineImagePrompt(model: string, userPrompt: string): Promise<string> {
   const result = await callClaude(model, userPrompt, 'roblox', [
     { role: 'user', content: `Write a DALL-E 3 prompt for this Roblox game asset: ${userPrompt}` },
@@ -16,7 +15,6 @@ async function refineImagePrompt(model: string, userPrompt: string): Promise<str
   return result.content.trim();
 }
 
-/** Generate an image via OpenAI DALL-E 3. Returns the hosted URL. */
 async function generateImage(prompt: string): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('Image generation is not configured (OPENAI_API_KEY missing)');
@@ -37,8 +35,6 @@ async function generateImage(prompt: string): Promise<string> {
   if (!url) throw new Error('No image URL returned from OpenAI');
   return url;
 }
-
-// ── Shared: save conversation + messages ──────────────────────────────────────
 
 async function saveMessages(
   userId: string,
@@ -91,12 +87,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const prompt: string       = body.prompt ?? body.message ?? '';
-    const type: string         = body.type   ?? 'script';   // 'script' | 'ui' | 'image'
-    const step: string         = body.step   ?? 'generate'; // image only: 'refine' | 'generate'
+    const prompt: string  = body.prompt ?? body.message ?? '';
+    const type: string    = body.type   ?? 'script';
+    const step: string    = body.step   ?? 'generate';
     const rawConvId: string | undefined = body.conversation_id ?? body.conversationId;
-    // Strip out frontend placeholder IDs (local_xxx) — only accept real UUIDs
-    const conversationId = rawConvId && !rawConvId.startsWith('local_') ? rawConvId : undefined;
+    const conversationId  = rawConvId && !rawConvId.startsWith('local_') ? rawConvId : undefined;
 
     if (!prompt) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
@@ -105,7 +100,6 @@ export async function POST(request: NextRequest) {
     const planModel   = getModelForPlan(user.plan);
     const actualModel = getActualModelId(planModel);
 
-    // Fetch conversation history if continuing
     let history: any[] = [];
     if (conversationId) {
       const { data: msgs } = await supabaseAdmin
@@ -116,7 +110,7 @@ export async function POST(request: NextRequest) {
       history = msgs ?? [];
     }
 
-    // ── Image: refine (non-streaming) ─────────────────────────────────────────
+    // ── Image: refine ─────────────────────────────────────────────────────────
     if (type === 'image' && step === 'refine') {
       const cost = CREDIT_COSTS.SCRIPT_SIMPLE;
       const creditResult = await deductCredits(user.id, cost, 'image_refine', { model: planModel });
@@ -134,7 +128,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ── Image: generate (non-streaming) ──────────────────────────────────────
+    // ── Image: generate ───────────────────────────────────────────────────────
     if (type === 'image' && step === 'generate') {
       const cost = CREDIT_COSTS.IMAGE;
       const creditResult = await deductCredits(user.id, cost, 'image_generation', { model: 'dall-e-3' });
@@ -152,80 +146,110 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ── Script / UI: streaming SSE ────────────────────────────────────────────
-    const cost = type === 'ui' ? CREDIT_COSTS.UI_MEDIUM : CREDIT_COSTS.SCRIPT_MEDIUM;
+    // ── Script / UI: streaming SSE with token-based billing ───────────────────
 
-    // Pre-flight credit check — fail fast before we open a stream
+    // Pre-flight: user must have at least 1 credit
     const { data: creditCheck } = await supabaseAdmin
       .from('users')
       .select('credits_used, credits_total')
       .eq('id', user.id)
       .single();
 
-    if (!creditCheck || (creditCheck.credits_total - creditCheck.credits_used) < cost) {
+    if (!creditCheck || (creditCheck.credits_total - creditCheck.credits_used) < 1) {
       return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
     }
 
     const encoder = new TextEncoder();
+    let clientCancelled = false;
 
     const readable = new ReadableStream({
       async start(controller) {
-        let fullContent = '';
+        let fullContent  = '';
+        let inputTokens  = 0;
+        let outputTokens = 0;
+
         try {
           const claudeStream = streamClaude(actualModel, prompt, 'roblox', history);
 
           for await (const chunk of claudeStream) {
-            if (
+            // Stop if client disconnected — don't charge
+            if (clientCancelled) break;
+
+            if (chunk.type === 'message_start') {
+              inputTokens = chunk.message?.usage?.input_tokens ?? 0;
+            } else if (chunk.type === 'message_delta') {
+              outputTokens = (chunk as any).usage?.output_tokens ?? 0;
+            } else if (
               chunk.type === 'content_block_delta' &&
               chunk.delta.type === 'text_delta'
             ) {
               fullContent += chunk.delta.text;
               controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: 'delta', text: chunk.delta.text })}\n\n`
-                )
+                encoder.encode(`data: ${JSON.stringify({ type: 'delta', text: chunk.delta.text })}\n\n`)
               );
             }
           }
 
-          // Deduct credits after stream completes
-          const creditResult = await deductCredits(user.id, cost, `${type}_generation`, {
+          // Client cancelled mid-stream — don't charge, don't save
+          if (clientCancelled) {
+            controller.close();
+            return;
+          }
+
+          // Calculate token-based cost
+          const totalTokens = inputTokens + outputTokens;
+          const tokenCost   = totalTokens > 0
+            ? tokensToCreditCost(planModel, totalTokens)
+            : (type === 'ui' ? CREDIT_COSTS.UI_MEDIUM : CREDIT_COSTS.SCRIPT_MEDIUM); // fallback
+
+          const creditResult = await deductCredits(user.id, tokenCost, `${type}_generation`, {
             model: planModel,
             actualModel,
-            messageLength: prompt.length,
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            total_tokens: totalTokens,
           });
 
-          // Save to DB
           const { convId, messageId } = await saveMessages(
             user.id,
             conversationId,
             prompt,
             fullContent,
             planModel,
-            cost,
+            tokenCost,
           );
 
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
                 type: 'done',
-                credits_used: cost,
+                credits_used: tokenCost,
                 credits_remaining: creditResult.creditsRemaining,
                 conversation_id: convId,
                 message_id: messageId,
+                tokens: { input: inputTokens, output: outputTokens, total: totalTokens },
               })}\n\n`
             )
           );
+
         } catch (err: any) {
-          console.error('[Roblox stream] Error:', err.message);
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ type: 'error', error: err.message || 'Internal server error' })}\n\n`
-            )
-          );
+          if (!clientCancelled) {
+            console.error('[Roblox stream] Error:', err.message);
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: 'error', error: err.message || 'Internal server error' })}\n\n`
+              )
+            );
+          }
         } finally {
           controller.close();
         }
+      },
+
+      // Called when the client disconnects (fetch aborted)
+      cancel() {
+        clientCancelled = true;
+        console.log('[Roblox stream] Client disconnected — not charging credits');
       },
     });
 

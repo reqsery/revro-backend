@@ -22,6 +22,21 @@ export const CREDIT_COSTS = {
   BLUEPRINT: 5
 };
 
+// Tokens per 1 credit, by model
+export const TOKEN_RATES: Record<string, number> = {
+  'claude-haiku-4-5':  2000,
+  'claude-sonnet-4-5': 1000,
+  'claude-sonnet-4-6':  800,
+  'claude-opus-4-5':    600,
+  'claude-opus-4-6':    500,
+};
+
+/** Convert raw token count to credits for a given plan model. Minimum 1. */
+export function tokensToCreditCost(planModel: string, totalTokens: number): number {
+  const rate = TOKEN_RATES[planModel] ?? 1000;
+  return Math.max(1, Math.ceil(totalTokens / rate));
+}
+
 // Plan configuration with Claude models
 export const PLAN_CONFIG = {
   free: {
@@ -51,7 +66,6 @@ export const PLAN_CONFIG = {
 };
 
 // Credits remaining at which a low-credits warning is sent per plan.
-// Free plan is absent — warning is never sent for free users.
 const LOW_CREDIT_THRESHOLDS: Partial<Record<keyof typeof PLAN_CONFIG, number>> = {
   starter: 20,
   pro: 50,
@@ -73,89 +87,107 @@ export async function hasCredits(userId: string, cost: number): Promise<boolean>
     .single();
 
   if (!user) throw new Error('User not found');
-
-  const available = user.credits_total - user.credits_used;
-  return available >= cost;
+  return (user.credits_total - user.credits_used) >= cost;
 }
 
-// Deduct credits from user and fire low-credit / depleted events when thresholds are crossed
+/**
+ * Deduct credits from user.
+ *
+ * Uses two separate queries so a missing optional column (e.g. low_credits_email_sent
+ * if not yet added to the schema) never blocks the actual credit deduction.
+ * Usage-log insert and email notifications are soft-fail — they never prevent the
+ * primary credit update from succeeding.
+ */
 export async function deductCredits(
   userId: string,
   cost: number,
   actionType: string,
   metadata: any = {}
-) {
-  const { data: user } = await supabaseAdmin
+): Promise<{ success: boolean; creditsUsed: number; creditsRemaining: number }> {
+
+  // ── 1. Read current balance (minimal columns only) ─────────────────────────
+  const { data: creditRow, error: fetchErr } = await supabaseAdmin
     .from('users')
-    .select('credits_used, credits_total, email, display_name, plan, billing_cycle_start, low_credits_email_sent')
+    .select('credits_used, credits_total')
     .eq('id', userId)
     .single();
 
-  if (!user) throw new Error('User not found');
+  if (fetchErr || !creditRow) throw new Error('User not found');
 
-  const available = user.credits_total - user.credits_used;
-  if (available < cost) {
-    throw new Error('Insufficient credits');
-  }
+  const available = creditRow.credits_total - creditRow.credits_used;
+  if (available < cost) throw new Error('Insufficient credits');
 
-  const newCreditsUsed = user.credits_used + cost;
-  const remaining = user.credits_total - newCreditsUsed;
+  // Cap so credits_used never exceeds credits_total
+  const newCreditsUsed = Math.min(creditRow.credits_used + cost, creditRow.credits_total);
+  const remaining      = creditRow.credits_total - newCreditsUsed;
 
-  // Update credits_used
-  await supabaseAdmin
+  // ── 2. Write new balance ───────────────────────────────────────────────────
+  const { error: updateErr } = await supabaseAdmin
     .from('users')
-    .update({ credits_used: newCreditsUsed })
+    .update({ credits_used: newCreditsUsed, updated_at: new Date().toISOString() })
     .eq('id', userId);
 
-  // Log usage
-  await supabaseAdmin
+  if (updateErr) throw new Error(`Credits update failed: ${updateErr.message}`);
+
+  // ── 3. Log usage (soft fail — wrong schema never blocks credits) ───────────
+  supabaseAdmin
     .from('usage_log')
-    .insert({
-      user_id: userId,
-      action_type: actionType,
-      credits_cost: cost,
-      model_used: metadata.model || null,
-      metadata
+    .insert({ user_id: userId, action: actionType, credits_used: cost, metadata })
+    .then(({ error }) => {
+      if (error) console.warn('[Credits] Usage log failed:', error.message);
     });
 
-  // Compute renewal date string from billing cycle start + 30 days
-  const renewalDate = new Date(
-    new Date(user.billing_cycle_start).getTime() + 30 * 24 * 60 * 60 * 1000
-  ).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  // ── 4. Email notifications (soft fail — separate query for optional cols) ──
+  void (async () => {
+    try {
+      const { data: emailRow } = await supabaseAdmin
+        .from('users')
+        .select('email, display_name, plan, billing_cycle_start, low_credits_email_sent')
+        .eq('id', userId)
+        .single();
 
-  const plan = user.plan as keyof typeof PLAN_CONFIG;
-  const threshold = LOW_CREDIT_THRESHOLDS[plan];
+      if (!emailRow) return;
 
-  // Fire low_credits once when threshold is first crossed (not for free plan)
-  if (threshold !== undefined && remaining <= threshold && remaining > 0 && !user.low_credits_email_sent) {
-    await supabaseAdmin
-      .from('users')
-      .update({ low_credits_email_sent: true })
-      .eq('id', userId);
+      const renewalDate = new Date(
+        new Date(emailRow.billing_cycle_start).getTime() + 30 * 24 * 60 * 60 * 1000
+      ).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-    void fireResendEvent('user.low_credits', user.email, user.display_name, {
-      first_name: user.display_name,
-      credits_remaining: remaining,
-      plan_name: user.plan,
-      renewal_date: renewalDate,
-    });
-  }
+      const plan      = emailRow.plan as keyof typeof PLAN_CONFIG;
+      const threshold = LOW_CREDIT_THRESHOLDS[plan];
 
-  // Fire credits_depleted when hitting zero (all plans)
-  if (remaining === 0) {
-    void fireResendEvent('user.credits_depleted', user.email, user.display_name, {
-      first_name: user.display_name,
-      credits_total: user.credits_total,
-      plan_name: user.plan,
-      reset_date: renewalDate,
-    });
-  }
+      if (
+        threshold !== undefined &&
+        remaining <= threshold &&
+        remaining > 0 &&
+        !emailRow.low_credits_email_sent
+      ) {
+        await supabaseAdmin
+          .from('users')
+          .update({ low_credits_email_sent: true })
+          .eq('id', userId);
 
-  return {
-    success: true,
-    creditsUsed: newCreditsUsed,
-    creditsRemaining: remaining,
-  };
+        void fireResendEvent('user.low_credits', emailRow.email, emailRow.display_name, {
+          first_name: emailRow.display_name,
+          credits_remaining: remaining,
+          plan_name: emailRow.plan,
+          renewal_date: renewalDate,
+        });
+      }
+
+      if (remaining === 0) {
+        void fireResendEvent('user.credits_depleted', emailRow.email, emailRow.display_name, {
+          first_name: emailRow.display_name,
+          credits_total: creditRow.credits_total,
+          plan_name: emailRow.plan,
+          reset_date: renewalDate,
+        });
+      }
+    } catch (e) {
+      console.warn('[Credits] Email notification failed:', e);
+    }
+  })();
+
+  return { success: true, creditsUsed: newCreditsUsed, creditsRemaining: remaining };
 }
 
 // Get user's current credit balance
@@ -188,10 +220,7 @@ export async function canGenerateImages(userId: string, count: number = 1) {
 
   const planConfig = PLAN_CONFIG[user.plan as keyof typeof PLAN_CONFIG];
   if (!planConfig || planConfig.images_max === 0) {
-    return {
-      allowed: false,
-      reason: 'Plan does not support image generation'
-    };
+    return { allowed: false, reason: 'Plan does not support image generation' };
   }
 
   if (user.images_generated + count > planConfig.images_max) {
