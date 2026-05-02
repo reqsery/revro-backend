@@ -95,9 +95,7 @@ export async function POST(request: NextRequest) {
           conversation_id: convId,
           role: 'assistant',
           content: aiResponse.content,
-          model_used: planModel,
-          credits_cost: cost,
-          tokens_used: totalTokens,
+          credits_used: Math.ceil(cost), // schema column is credits_used (integer)
         })
         .select('id')
         .single()

@@ -80,8 +80,7 @@ async function saveMessages(
         conversation_id: convId,
         role: 'assistant',
         content: responseText,
-        model_used: planModel,
-        credits_cost: cost,
+        credits_used: Math.ceil(cost), // schema column is credits_used (integer)
       })
       .select('id')
       .single();
