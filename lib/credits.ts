@@ -67,9 +67,10 @@ export const PLAN_CONFIG = {
 
 // Credits remaining at which a low-credits warning is sent per plan.
 const LOW_CREDIT_THRESHOLDS: Partial<Record<keyof typeof PLAN_CONFIG, number>> = {
+  free:    5,
   starter: 20,
-  pro: 50,
-  studio: 150,
+  pro:     50,
+  studio:  150,
 };
 
 // Get Claude model for user's plan
@@ -137,50 +138,69 @@ export async function deductCredits(
       if (error) console.warn('[Credits] Usage log failed:', error.message);
     });
 
-  // ── 4. Email notifications (soft fail — separate query for optional cols) ──
+  // ── 4. Email notifications (fully soft-fail — two independent queries) ──────
+  //
+  // Query A: basic columns (email, name, plan) — always exists, used for both emails
+  // Query B: optional low_credits_email_sent — only used for the low-credits gate
+  // This way emails fire even if the migration for low_credits_email_sent hasn't run yet.
+
   void (async () => {
     try {
-      const { data: emailRow } = await supabaseAdmin
+      // Query A — columns that always exist
+      const { data: baseRow } = await supabaseAdmin
         .from('users')
-        .select('email, display_name, plan, billing_cycle_start, low_credits_email_sent')
+        .select('email, display_name, plan, billing_cycle_start')
         .eq('id', userId)
         .single();
 
-      if (!emailRow) return;
+      if (!baseRow) return;
 
       const renewalDate = new Date(
-        new Date(emailRow.billing_cycle_start).getTime() + 30 * 24 * 60 * 60 * 1000
+        new Date(baseRow.billing_cycle_start).getTime() + 30 * 24 * 60 * 60 * 1000
       ).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-      const plan      = emailRow.plan as keyof typeof PLAN_CONFIG;
-      const threshold = LOW_CREDIT_THRESHOLDS[plan];
-
-      if (
-        threshold !== undefined &&
-        remaining <= threshold &&
-        remaining > 0 &&
-        !emailRow.low_credits_email_sent
-      ) {
-        await supabaseAdmin
-          .from('users')
-          .update({ low_credits_email_sent: true })
-          .eq('id', userId);
-
-        void fireResendEvent('user.low_credits', emailRow.email, emailRow.display_name, {
-          first_name: emailRow.display_name,
-          credits_remaining: remaining,
-          plan_name: emailRow.plan,
-          renewal_date: renewalDate,
+      // ── Credits depleted ─────────────────────────────────────────────────
+      if (remaining === 0) {
+        void fireResendEvent('user.credits_depleted', baseRow.email, baseRow.display_name, {
+          first_name:    baseRow.display_name,
+          credits_total: creditRow.credits_total,
+          plan_name:     baseRow.plan,
+          reset_date:    renewalDate,
         });
       }
 
-      if (remaining === 0) {
-        void fireResendEvent('user.credits_depleted', emailRow.email, emailRow.display_name, {
-          first_name: emailRow.display_name,
-          credits_total: creditRow.credits_total,
-          plan_name: emailRow.plan,
-          reset_date: renewalDate,
-        });
+      // ── Low credits warning ──────────────────────────────────────────────
+      const plan      = baseRow.plan as keyof typeof PLAN_CONFIG;
+      const threshold = LOW_CREDIT_THRESHOLDS[plan];
+
+      if (threshold !== undefined && remaining > 0 && remaining <= threshold) {
+        // Query B — optional column (soft fail if migration not yet run)
+        let alreadySent = false;
+        try {
+          const { data: flagRow } = await supabaseAdmin
+            .from('users')
+            .select('low_credits_email_sent')
+            .eq('id', userId)
+            .single();
+          alreadySent = flagRow?.low_credits_email_sent ?? false;
+        } catch {}
+
+        if (!alreadySent) {
+          // Best-effort update of the flag; ignore failure if column missing
+          try {
+            await supabaseAdmin
+              .from('users')
+              .update({ low_credits_email_sent: true })
+              .eq('id', userId);
+          } catch {}
+
+          void fireResendEvent('user.low_credits', baseRow.email, baseRow.display_name, {
+            first_name:       baseRow.display_name,
+            credits_remaining: remaining,
+            plan_name:        baseRow.plan,
+            renewal_date:     renewalDate,
+          });
+        }
       }
     } catch (e) {
       console.warn('[Credits] Email notification failed:', e);
