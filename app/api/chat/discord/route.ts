@@ -4,115 +4,109 @@ import { deductCredits, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
 import { callClaude, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
+export const dynamic = 'force-dynamic';
+
+/** Try to pull a JSON block out of Claude's response, return the rest as explanation. */
+function parseDiscordResponse(raw: string): { explanation: string; config?: any } {
+  const match = raw.match(/```(?:json)?\n([\s\S]*?)```/)
+  if (match) {
+    try {
+      const config = JSON.parse(match[1])
+      const explanation = raw.replace(/```(?:json)?\n[\s\S]*?```/g, '').trim()
+      return { explanation, config }
+    } catch {}
+  }
+  return { explanation: raw }
+}
+
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
-  
-  if (user instanceof NextResponse) {
-    return user;
-  }
+  if (user instanceof NextResponse) return user;
 
   try {
-    const { message, conversationId } = await request.json();
+    const body = await request.json();
 
-    if (!message) {
-      return NextResponse.json(
-        { error: 'Message is required' },
-        { status: 400 }
-      );
+    // Support both old (message/conversationId) and new (prompt/conversation_id) field names
+    const prompt: string       = body.prompt ?? body.message ?? ''
+    const conversationId: string | undefined = body.conversation_id ?? body.conversationId
+
+    if (!prompt) {
+      return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
-    // Get model for user's plan
-    const planModel = getModelForPlan(user.plan);
-    const actualModelId = getActualModelId(planModel);
+    const planModel   = getModelForPlan(user.plan)
+    const actualModel = getActualModelId(planModel)
 
-    // Get conversation history
-    let conversationHistory: any[] = [];
+    // Fetch conversation history
+    let history: any[] = []
     if (conversationId) {
-      const { data: messages } = await supabaseAdmin
+      const { data: msgs } = await supabaseAdmin
         .from('messages')
         .select('role, content')
         .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-      
-      conversationHistory = messages || [];
+        .order('created_at', { ascending: true })
+      history = msgs ?? []
     }
 
-    // Estimate credit cost
-    const estimatedCost = CREDIT_COSTS.PLANNING;
+    const cost = CREDIT_COSTS.PLANNING
 
-    // Call Claude API
-    const aiResponse = await callClaude(
-      actualModelId,
-      message,
-      'discord',
-      conversationHistory
-    );
+    const aiResponse  = await callClaude(actualModel, prompt, 'discord', history)
+    const creditResult = await deductCredits(user.id, cost, 'discord_generation', {
+      model: planModel,
+      actualModel,
+      messageLength: prompt.length,
+    })
 
-    // Deduct credits
-    const creditResult = await deductCredits(
-      user.id,
-      estimatedCost,
-      'discord_generation',
-      { 
-        model: planModel,
-        actualModel: actualModelId,
-        messageLength: message.length 
-      }
-    );
+    const { explanation, config } = parseDiscordResponse(aiResponse.content)
 
-    // Save to conversation
-    let convId = conversationId;
+    // Save / create conversation
+    let convId = conversationId
     if (!convId) {
       const { data: conv } = await supabaseAdmin
         .from('conversations')
-        .insert({
-          user_id: user.id,
-          title: message.substring(0, 50),
-          type: 'discord'
-        })
-        .select()
-        .single();
-      convId = conv?.id;
+        .insert({ user_id: user.id, title: prompt.substring(0, 50), type: 'discord' })
+        .select('id')
+        .single()
+      convId = conv?.id
     }
 
+    let messageId: string | null = null
     if (convId) {
-      await supabaseAdmin.from('messages').insert([
-        {
-          conversation_id: convId,
-          role: 'user',
-          content: message
-        },
-        {
+      await supabaseAdmin.from('messages').insert({
+        conversation_id: convId,
+        role: 'user',
+        content: prompt,
+      })
+      const { data: assistantMsg } = await supabaseAdmin
+        .from('messages')
+        .insert({
           conversation_id: convId,
           role: 'assistant',
           content: aiResponse.content,
           model_used: planModel,
-          credits_cost: estimatedCost
-        }
-      ]);
+          credits_cost: cost,
+        })
+        .select('id')
+        .single()
+      messageId = assistantMsg?.id ?? null
     }
 
     return NextResponse.json({
-      response: aiResponse.content,
-      conversationId: convId,
-      creditsUsed: estimatedCost,
-      creditsRemaining: creditResult.creditsRemaining,
-      model: 'Revro AI'
+      response: {
+        explanation,
+        ...(config ? { config } : {}),
+        credits_used: cost,
+        credits_remaining: creditResult.creditsRemaining,
+      },
+      conversation_id: convId ?? null,
+      message_id: messageId,
     });
 
   } catch (error: any) {
-    console.error('Discord chat error:', error);
-    
+    console.error('[Discord chat] Error:', error);
     if (error.message === 'Insufficient credits') {
-      return NextResponse.json(
-        { error: 'Insufficient credits' },
-        { status: 402 }
-      );
+      return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
     }
-
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
