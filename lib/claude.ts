@@ -28,22 +28,24 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
 \`\`\`json
 {
   "roles": [
-    { "name": "Admin", "color": 15158332, "hoist": true, "mentionable": false, "permissions": "8" },
-    { "name": "Moderator", "color": 3447003, "hoist": true, "mentionable": true, "permissions": "0" }
+    { "name": "Admin", "emoji": "👑", "color": 15158332, "hoist": true, "mentionable": false, "permissions": "8" },
+    { "name": "Moderator", "emoji": "🛡️", "color": 3447003, "hoist": true, "mentionable": true, "permissions": "2" }
   ],
   "categories": [
     {
       "name": "INFORMATION",
+      "emoji": "📢",
       "channels": [
-        { "name": "rules", "type": "text", "topic": "Server rules and guidelines" },
-        { "name": "announcements", "type": "text", "topic": "Important announcements" }
+        { "name": "rules", "type": "text", "emoji": "📌", "topic": "Server rules and guidelines" },
+        { "name": "announcements", "type": "text", "emoji": "📣", "topic": "Important announcements" }
       ]
     },
     {
       "name": "GENERAL",
+      "emoji": "💬",
       "channels": [
-        { "name": "general", "type": "text", "topic": "General chat" },
-        { "name": "voice-chat", "type": "voice" }
+        { "name": "general", "type": "text", "emoji": "💬", "topic": "General chat" },
+        { "name": "voice-chat", "type": "voice", "emoji": "🔊" }
       ]
     }
   ]
@@ -52,7 +54,10 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
 
 Rules for the JSON:
 - Role colors are decimal integers (e.g. red=15158332, blue=3447003, green=3066993, purple=10181046, orange=15105570)
-- permissions "8" = Administrator, "0" = no special permissions
+- permissions: "8" = Administrator, "2" = Kick Members, "4" = Ban Members, "2048" = Send Messages, "1024" = View Channels, "8192" = Manage Messages, "0" = no special permissions
+- Each role MUST have an appropriate emoji field that visually represents the role
+- Each channel MUST have an appropriate emoji field that visually represents the channel's purpose
+- Each category MUST have an appropriate emoji field that visually represents the category's theme
 - Channel type is "text" or "voice"
 - Category and channel names should be lowercase with hyphens (Discord style)
 - Include 3-8 roles and 3-6 categories with 2-5 channels each
