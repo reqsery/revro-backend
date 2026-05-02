@@ -25,7 +25,7 @@ For support, updates, and early features, join the Discord: https://discord.gg/v
 - **Authentication:** Supabase Auth
 - **AI:** Anthropic Claude API (Sonnet 4.5, 4.6, Opus 4.6)
 - **Email:** Resend
-- **Payments:** Stripe
+- **Payments:** LemonSqueezy or Stripe (both webhook handlers included — use either or both)
 - **Hosting:** Vercel
 - **Monitoring:** Sentry (optional)
 
@@ -62,11 +62,22 @@ OPENAI_API_KEY=sk-your_key_here
 # Resend Email
 RESEND_API_KEY=re_your_key_here
 
-# Stripe
-STRIPE_SECRET_KEY=sk_test_your_key_here
-
 # Environment
 NODE_ENV=production
+
+# Payments — LemonSqueezy (use if paying with LemonSqueezy)
+LEMONSQUEEZY_WEBHOOK_SECRET=your_lemonsqueezy_webhook_secret
+
+# Payments — Stripe (use if paying with Stripe)
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+# Map your Stripe Price IDs to plans (create these in the Stripe dashboard)
+STRIPE_PRICE_STARTER=price_...
+STRIPE_PRICE_STARTER_ANNUAL=price_...
+STRIPE_PRICE_PRO=price_...
+STRIPE_PRICE_PRO_ANNUAL=price_...
+STRIPE_PRICE_STUDIO=price_...
+STRIPE_PRICE_STUDIO_ANNUAL=price_...
 
 # Sentry (optional)
 NEXT_PUBLIC_SENTRY_DSN=your_sentry_dsn
@@ -159,6 +170,10 @@ curl -H "x-api-key: your_api_key_here" \
 ```
 
 ---
+
+**Webhooks:**
+- `POST /api/webhooks/lemonsqueezy` — LemonSqueezy subscription lifecycle events
+- `POST /api/webhooks/stripe` — Stripe subscription lifecycle events
 
 ## Authentication
 
@@ -281,6 +296,7 @@ curl -X POST http://localhost:3000/api/chat/roblox \
 ```
 revro-backend/
 ├── app/
+<<<<<<< HEAD
 │   ├── api/
 │   │   ├── auth/           # Authentication endpoints
 │   │   ├── chat/           # AI chat endpoints
@@ -288,6 +304,17 @@ revro-backend/
 │   │   └── user/           # User management
 │   ├── layout.tsx          # Root layout
 │   └── global-error.tsx    # Global error handler
+=======
+│  ├── api/
+│  │  ├── auth/      # Authentication endpoints
+│  │  ├── chat/      # AI chat endpoints
+│  │  ├── plugin/    # Plugin communication
+│  │  ├── user/      # User management
+│  │  └── webhooks/
+│  │     ├── lemonsqueezy/  # LemonSqueezy subscription webhooks
+│  │     └── stripe/        # Stripe subscription webhooks
+│  └── layout.tsx
+>>>>>>> 4ca6d8b (feat: add LemonSqueezy and Stripe webhook handlers)
 ├── lib/
 │   ├── supabase.ts         # Supabase client configuration
 │   ├── claude.ts           # Claude AI integration
