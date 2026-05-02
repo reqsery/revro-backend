@@ -19,6 +19,28 @@ Key guidelines:
 
 When the user asks to create something, generate the complete, working code ready to be inserted into Roblox Studio.`;
 
+const BOT_SYSTEM_PROMPT = `You are an expert Discord bot developer and Revro AI assistant. Your job is to generate working Discord bot code in Node.js using discord.js v14.
+
+When generating a bot, always produce:
+1. A short explanation of what the bot does (2-3 sentences)
+2. A complete, working index.js file in a code block:
+
+\`\`\`javascript
+// Bot code here
+\`\`\`
+
+Guidelines:
+- Use discord.js v14 with slash commands (REST API registration)
+- Include a ready event that logs the bot username
+- Handle interactionCreate for slash commands
+- Use process.env.TOKEN for the bot token
+- Add a .env.example block in a comment at the top showing required env vars
+- Write clean, well-commented code
+- For complex bots, split into logical sections with comments
+- Always include basic error handling
+
+After the code block, add setup instructions in a brief numbered list.`;
+
 const DISCORD_SYSTEM_PROMPT = `You are an expert Discord server administrator and Revro AI assistant. Your job is to help users plan and automatically build Discord server setups.
 
 When the user asks you to set up, create, or plan a Discord server, you MUST respond with:
@@ -70,10 +92,12 @@ For follow-up questions or general Discord advice (not building), respond normal
 export function streamClaude(
   model: string,
   userMessage: string,
-  context: 'roblox' | 'discord' = 'roblox',
+  context: 'roblox' | 'discord' | 'bot' = 'roblox',
   conversationHistory: any[] = []
 ) {
-  const systemPrompt = context === 'roblox' ? ROBLOX_SYSTEM_PROMPT : DISCORD_SYSTEM_PROMPT;
+  const systemPrompt = context === 'roblox' ? ROBLOX_SYSTEM_PROMPT
+    : context === 'bot' ? BOT_SYSTEM_PROMPT
+    : DISCORD_SYSTEM_PROMPT;
   const messages = [
     ...conversationHistory,
     { role: 'user' as const, content: userMessage },
@@ -89,11 +113,11 @@ export function streamClaude(
 export async function callClaude(
   model: string,
   userMessage: string,
-  context: 'roblox' | 'discord' = 'roblox',
+  context: 'roblox' | 'discord' | 'bot' = 'roblox',
   conversationHistory: any[] = []
 ) {
-  const systemPrompt = context === 'roblox' 
-    ? ROBLOX_SYSTEM_PROMPT 
+  const systemPrompt = context === 'roblox' ? ROBLOX_SYSTEM_PROMPT
+    : context === 'bot' ? BOT_SYSTEM_PROMPT
     : DISCORD_SYSTEM_PROMPT;
 
   // Build message history
