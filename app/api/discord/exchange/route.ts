@@ -29,9 +29,9 @@ export async function POST(request: NextRequest) {
   const { code } = await request.json();
   if (!code) return NextResponse.json({ error: 'code is required' }, { status: 400 });
 
-  const clientSecret = process.env.DISCORD_CLIENT_SECRET;
+  const clientSecret = process.env.DISCORD_CLIENT_SECRET || process.env.DISCORD_SECRET;
   if (!clientSecret) {
-    return NextResponse.json({ error: 'Discord OAuth is not configured (DISCORD_CLIENT_SECRET missing)' }, { status: 503 });
+    return NextResponse.json({ error: 'Set DISCORD_CLIENT_SECRET in your Vercel backend env vars (Discord Developer Portal → OAuth2 → Client Secret)' }, { status: 503 });
   }
 
   // ── 1. Exchange code for access token ─────────────────────────────────────

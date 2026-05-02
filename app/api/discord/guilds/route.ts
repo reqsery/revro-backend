@@ -35,25 +35,32 @@ export async function GET(request: NextRequest) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
 
-  const token = process.env.DISCORD_BOT_TOKEN;
-  if (!token) {
-    return NextResponse.json({ error: 'Discord bot is not configured' }, { status: 503 });
-  }
-
   // Read user's stored data (soft-fail if columns not yet migrated)
   let storedGuildIds: string[] | null = null;
   let savedGuildId:   string | null = null;
+  let userBotToken:   string | null = null;
   try {
     const { data } = await supabaseAdmin
       .from('users')
-      .select('discord_guild_ids, discord_guild_id')
+      .select('discord_guild_ids, discord_guild_id, discord_bot_token')
       .eq('id', user.id)
       .single();
     if (data?.discord_guild_ids) {
       storedGuildIds = JSON.parse(data.discord_guild_ids);
     }
     savedGuildId = data?.discord_guild_id ?? null;
+    userBotToken = data?.discord_bot_token ?? null;
   } catch {}
+
+  // Bot token: prefer env var (platform-level), fall back to user's saved token
+  const token = process.env.DISCORD_BOT_TOKEN
+    || process.env.BOT_TOKEN
+    || process.env.DISCORD_TOKEN
+    || userBotToken;
+
+  if (!token) {
+    return NextResponse.json({ error: 'Discord bot token is not configured — set DISCORD_BOT_TOKEN in Vercel env vars or connect your bot first' }, { status: 503 });
+  }
 
   // User hasn't connected their Discord account yet
   if (!storedGuildIds) {
