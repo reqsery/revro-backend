@@ -6,7 +6,6 @@ export const dynamic = 'force-dynamic';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
-/** Fetch all guilds the Revro bot is currently in. */
 async function fetchBotGuilds(token: string) {
   const res = await fetch(`${DISCORD_API}/users/@me/guilds`, {
     headers: { Authorization: `Bot ${token}` },
@@ -14,18 +13,23 @@ async function fetchBotGuilds(token: string) {
   if (!res.ok) throw new Error(`Discord API ${res.status}`);
   const raw: any[] = await res.json();
   return raw.map(g => ({
-    id: g.id,
-    name: g.name,
-    icon: g.icon ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` : null,
+    id:          g.id,
+    name:        g.name,
+    icon:        g.icon ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` : null,
     memberCount: g.approximate_member_count ?? null,
   }));
 }
 
 /**
  * GET /api/discord/guilds
- * Returns guilds the bot is in.
- * If the user has a saved discord_guild_id, that guild is returned first.
- * Other guilds are still included so the user can switch servers.
+ *
+ * If the user has connected their Discord account (discord_guild_ids stored),
+ * returns only the servers where BOTH conditions are true:
+ *   - The user is admin/owner (from their OAuth guilds)
+ *   - The Revro bot is already in that server
+ *
+ * If not connected, returns { guilds: [], connected: false } so the frontend
+ * shows a "Connect Discord" prompt instead of a server list.
  */
 export async function GET(request: NextRequest) {
   const user = await requireAuth(request);
@@ -36,48 +40,59 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Discord bot is not configured' }, { status: 503 });
   }
 
-  let allGuilds: ReturnType<typeof fetchBotGuilds> extends Promise<infer T> ? T : never;
+  // Read user's stored data (soft-fail if columns not yet migrated)
+  let storedGuildIds: string[] | null = null;
+  let savedGuildId:   string | null = null;
   try {
-    allGuilds = await fetchBotGuilds(token);
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('discord_guild_ids, discord_guild_id')
+      .eq('id', user.id)
+      .single();
+    if (data?.discord_guild_ids) {
+      storedGuildIds = JSON.parse(data.discord_guild_ids);
+    }
+    savedGuildId = data?.discord_guild_id ?? null;
+  } catch {}
+
+  // User hasn't connected their Discord account yet
+  if (!storedGuildIds) {
+    return NextResponse.json({ guilds: [], connected: false, savedGuildId: null });
+  }
+
+  // Fetch all servers the bot is in
+  let botGuilds: Awaited<ReturnType<typeof fetchBotGuilds>>;
+  try {
+    botGuilds = await fetchBotGuilds(token);
   } catch (e) {
     console.error('[Discord guilds] fetch failed:', e);
     return NextResponse.json({ error: 'Failed to fetch servers from Discord' }, { status: 502 });
   }
 
-  // Read user's saved guild (soft-fail if column doesn't exist yet)
-  let savedGuildId: string | null = null;
-  try {
-    const { data } = await supabaseAdmin
-      .from('users')
-      .select('discord_guild_id')
-      .eq('id', user.id)
-      .single();
-    savedGuildId = data?.discord_guild_id ?? null;
-  } catch {}
+  // Intersection: only show guilds where user is admin AND bot is present
+  const botGuildSet = new Set(botGuilds.map(g => g.id));
+  const guilds = botGuilds.filter(g => storedGuildIds!.includes(g.id) && botGuildSet.has(g.id));
 
-  // Put the saved guild first so the frontend can pre-select it
+  // Put the saved (previously selected) guild first
   if (savedGuildId) {
-    allGuilds.sort((a, b) => (a.id === savedGuildId ? -1 : b.id === savedGuildId ? 1 : 0));
+    guilds.sort((a, b) => (a.id === savedGuildId ? -1 : b.id === savedGuildId ? 1 : 0));
   }
 
-  return NextResponse.json({ guilds: allGuilds, savedGuildId });
+  return NextResponse.json({ guilds, connected: true, savedGuildId });
 }
 
 /**
  * POST /api/discord/guilds
- * Body: { guild_id, guild_name, guild_icon }
- * Saves the user's chosen server to their profile so it persists across sessions.
+ * Body: { guild_id }
+ * Saves the user's chosen server to their profile for persistence.
  */
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
 
-  const { guild_id, guild_name, guild_icon } = await request.json();
-  if (!guild_id) {
-    return NextResponse.json({ error: 'guild_id is required' }, { status: 400 });
-  }
+  const { guild_id } = await request.json();
+  if (!guild_id) return NextResponse.json({ error: 'guild_id is required' }, { status: 400 });
 
-  // Soft-fail — column may not exist yet on older deployments
   try {
     await supabaseAdmin
       .from('users')

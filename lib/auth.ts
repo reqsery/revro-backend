@@ -28,9 +28,27 @@ export async function getUser(request: NextRequest) {
       .eq('id', user.id)
       .single();
 
-    if (userData) return userData;
+    if (userData) {
+      // Block users whose deletion has been scheduled — revoke their session immediately
+      if (userData.deletion_scheduled_at) {
+        await supabaseAdmin.auth.admin.signOut(user.id, 'global').catch(() => {})
+        return null
+      }
+      return userData;
+    }
 
     // ── Auto-provision new user on first login ────────────────────────────
+    // Safety check: only provision accounts that are genuinely new (< 15 min old).
+    // If the auth account is older than 15 min with no DB row, the user was likely
+    // deleted directly from the database — don't silently recreate their account.
+    const accountAgeMs = Date.now() - new Date(user.created_at ?? 0).getTime()
+    if (accountAgeMs > 15 * 60 * 1000) {
+      console.warn(`[Auth] Refusing to re-provision ${user.email} — auth account is ${Math.round(accountAgeMs / 60000)}min old but has no DB record. Likely a deleted user.`)
+      // Fully revoke their auth session so they're truly signed out
+      await supabaseAdmin.auth.admin.signOut(user.id, 'global').catch(() => {})
+      return null
+    }
+
     // Covers both OAuth (Google) and email/password users that signed up
     // directly via the Supabase client SDK without hitting /api/auth/signup.
     const email       = user.email ?? ''
