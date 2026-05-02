@@ -127,10 +127,21 @@ export async function deductCredits(
   const remaining      = creditRow.credits_total - newCreditsUsed;
 
   // ── 2. Write new balance ───────────────────────────────────────────────────
-  const { error: updateErr } = await supabaseAdmin
+  // Try with exact decimal first (works once credits_used column is NUMERIC).
+  // Fall back to Math.ceil if Postgres rejects the decimal (INTEGER column still in use).
+  let { error: updateErr } = await supabaseAdmin
     .from('users')
     .update({ credits_used: newCreditsUsed, updated_at: new Date().toISOString() })
     .eq('id', userId);
+
+  if (updateErr?.message?.includes('invalid input syntax') || updateErr?.code === '22P02') {
+    const rounded = Math.ceil(newCreditsUsed);
+    const retry = await supabaseAdmin
+      .from('users')
+      .update({ credits_used: rounded, updated_at: new Date().toISOString() })
+      .eq('id', userId);
+    updateErr = retry.error;
+  }
 
   if (updateErr) throw new Error(`Credits update failed: ${updateErr.message}`);
 
