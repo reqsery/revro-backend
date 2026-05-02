@@ -9,9 +9,12 @@ export const dynamic = 'force-dynamic';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function refineImagePrompt(model: string, userPrompt: string): Promise<string> {
-  const result = await callClaude(model, userPrompt, 'roblox', [
-    { role: 'user', content: `Write a DALL-E 3 prompt for this Roblox game asset: ${userPrompt}` },
-  ]);
+  const result = await callClaude(
+    model,
+    `Write a concise, vivid DALL-E 3 image prompt for this Roblox game asset request: ${userPrompt}. Output only the image prompt, no explanation.`,
+    'roblox',
+    []
+  );
   return result.content.trim();
 }
 

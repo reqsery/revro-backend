@@ -58,6 +58,49 @@ export async function POST(request: NextRequest) {
   });
 }
 
+/** GET /api/discord/connect — return currently connected bot info (if any) */
+export async function GET(request: NextRequest) {
+  const user = await requireAuth(request);
+  if (user instanceof NextResponse) return user;
+
+  const { data: userData } = await supabaseAdmin
+    .from('users')
+    .select('discord_bot_token')
+    .eq('id', user.id)
+    .single();
+
+  const token = userData?.discord_bot_token;
+  if (!token) {
+    return NextResponse.json({ connected: false });
+  }
+
+  // Validate the token is still valid
+  const discordRes = await fetch(`${DISCORD_API}/users/@me`, {
+    headers: { Authorization: `Bot ${token}` },
+  });
+
+  if (!discordRes.ok) {
+    // Token expired / revoked — clear it
+    await supabaseAdmin
+      .from('users')
+      .update({ discord_bot_token: null })
+      .eq('id', user.id);
+    return NextResponse.json({ connected: false });
+  }
+
+  const botInfo: any = await discordRes.json();
+  return NextResponse.json({
+    connected: true,
+    bot: {
+      id: botInfo.id,
+      username: botInfo.username,
+      avatar: botInfo.avatar
+        ? `https://cdn.discordapp.com/avatars/${botInfo.id}/${botInfo.avatar}.png`
+        : null,
+    },
+  });
+}
+
 /** DELETE /api/discord/connect — remove the stored bot token */
 export async function DELETE(request: NextRequest) {
   const user = await requireAuth(request);

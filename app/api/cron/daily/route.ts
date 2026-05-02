@@ -77,14 +77,14 @@ export async function GET(request: NextRequest) {
         // Fetch usage stats for the closing cycle
         const { data: logs } = await supabaseAdmin
           .from('usage_log')
-          .select('action_type')
+          .select('action')
           .eq('user_id', user.id)
           .gte('created_at', cycleStart);
 
         const entries = logs ?? [];
-        const scriptsCount = entries.filter(l => l.action_type === 'roblox_generation').length;
-        const uiCount     = entries.filter(l => l.action_type === 'ui_generation').length;
-        const discordCount = entries.filter(l => l.action_type === 'discord_generation').length;
+        const scriptsCount = entries.filter(l => l.action === 'script_generation' || l.action === 'roblox_generation').length;
+        const uiCount     = entries.filter(l => l.action === 'ui_generation').length;
+        const discordCount = entries.filter(l => l.action === 'discord_generation').length;
 
         void fireResendEvent('user.monthly_summary', user.email, user.display_name, {
           first_name:    user.display_name,
