@@ -69,11 +69,13 @@ export async function callClaude(
   }
 }
 
-// Model mapping (use actual Anthropic model IDs)
-export const MODEL_IDS = {
-  'claude-sonnet-4-5': 'claude-sonnet-4-5-20251001',
-  'claude-sonnet-4-6': 'claude-sonnet-4-6',
-  'claude-opus-4-6':   'claude-opus-4-6',
+// Model mapping — keys match PLAN_CONFIG model names, values are Anthropic API model IDs
+export const MODEL_IDS: Record<string, string> = {
+  'claude-haiku-4-5':   'claude-haiku-4-5',
+  'claude-sonnet-4-5':  'claude-sonnet-4-5',
+  'claude-sonnet-4-6':  'claude-sonnet-4-6',
+  'claude-opus-4-5':    'claude-opus-4-5',
+  'claude-opus-4-6':    'claude-opus-4-6',
 };
 
 export function getActualModelId(planModel: string): string {

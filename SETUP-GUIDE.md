@@ -15,6 +15,7 @@ Before you begin, ensure you have:
 - **Supabase account** — [Sign up](https://supabase.com/)
 - **Anthropic API key** — [Get key](https://console.anthropic.com/)
 - **Resend account** — [Sign up](https://resend.com/)
+- **Whop account** (billing) — [Sign up](https://whop.com/) *(or Stripe — see Step 6)*
 
 Verify your setup:
 
@@ -208,11 +209,21 @@ FOR SELECT TO authenticated USING (auth.uid() = user_id);
 3. Copy the key — it starts with `sk-ant-`
 4. Note: a payment method is required to use the API
 
+Models used by each plan:
+
+| Plan | Model |
+|------|-------|
+| Free | `claude-sonnet-4-5` |
+| Starter | `claude-sonnet-4-6` |
+| Pro | `claude-opus-4-6` |
+| Studio | `claude-opus-4-6` |
+
 ### Resend (Email)
 
 1. Go to [resend.com](https://resend.com/)
 2. Navigate to **API Keys** and click **Create API Key**
 3. Name it "Revro Development" and copy the key — it starts with `re_`
+4. Verify your domain (`revro.dev`) under **Domains** so emails send from `noreply@revro.dev`
 
 ---
 
@@ -235,10 +246,29 @@ CLAUDE_API_KEY=sk-ant-your_key_here
 
 # Resend (Email)
 RESEND_API_KEY=re_your_key_here
+RESEND_FROM_EMAIL=noreply@revro.dev
 
 # Plugin Server (use localhost for local testing)
 PLUGIN_SERVER_URL=http://localhost:3600
 PLUGIN_SHARED_SECRET=generate_a_64_character_random_hex_string
+
+# ── Billing: Whop (primary) ────────────────────────────────────────────────
+# Get these from your Whop dashboard → Developer → Webhooks
+WHOP_WEBHOOK_SECRET=whop_whs_your_secret_here
+
+# Product IDs from Whop dashboard → Products
+WHOP_PRODUCT_STARTER=prod_xxxxxxxx
+WHOP_PRODUCT_PRO=prod_xxxxxxxx
+WHOP_PRODUCT_STUDIO=prod_xxxxxxxx
+
+# Annual plan product IDs (if you have separate annual products)
+# WHOP_PRODUCT_STARTER_ANNUAL=prod_xxxxxxxx
+# WHOP_PRODUCT_PRO_ANNUAL=prod_xxxxxxxx
+# WHOP_PRODUCT_STUDIO_ANNUAL=prod_xxxxxxxx
+
+# ── Billing: Stripe (alternative — leave unset if using Whop) ─────────────
+# STRIPE_SECRET_KEY=sk_live_your_key_here
+# STRIPE_WEBHOOK_SECRET=whsec_your_secret_here
 
 # Sentry (optional)
 NEXT_PUBLIC_SENTRY_DSN=your_sentry_dsn_here
@@ -258,6 +288,105 @@ openssl rand -hex 32
 
 # Windows (PowerShell)
 -join ((48..57) + (65..70) | Get-Random -Count 64 | % {[char]$_})
+```
+
+---
+
+## Step 6: Set Up Billing
+
+Revro supports **Whop** (primary) and **Stripe** (alternative). Both can be configured at the same time — Whop takes priority if `WHOP_WEBHOOK_SECRET` is set.
+
+---
+
+### Option A — Whop (Recommended)
+
+[Whop](https://whop.com/) handles subscriptions, checkout, and renewals. Users manage their subscriptions at **whop.com/hub**.
+
+#### 6A.1 — Create a Whop Account
+
+1. Go to [whop.com](https://whop.com/) and sign up as a seller
+2. Create a new **Company** for Revro
+
+#### 6A.2 — Create Products
+
+Create one product per plan:
+
+| Plan | Suggested name | Billing |
+|------|---------------|---------|
+| Starter | Revro Starter | Monthly |
+| Pro | Revro Pro | Monthly |
+| Studio | Revro Studio | Monthly |
+
+For each product:
+1. Go to **Products → Create Product**
+2. Set the price and billing interval
+3. Copy the **Product ID** (starts with `prod_`) — you'll need this for env vars
+
+#### 6A.3 — Set Up the Webhook
+
+1. Go to **Developer → Webhooks** in the Whop dashboard
+2. Click **Add Webhook**
+3. Set the URL to: `https://your-backend.vercel.app/api/webhooks/whop`
+4. Select these events:
+   - `membership.went_valid`
+   - `membership.went_invalid`
+   - `payment.succeeded`
+   - `payment.failed`
+5. Copy the **Webhook Secret** — add it to `WHOP_WEBHOOK_SECRET`
+
+#### 6A.4 — Set Env Vars
+
+```env
+WHOP_WEBHOOK_SECRET=whop_whs_...
+WHOP_PRODUCT_STARTER=prod_...
+WHOP_PRODUCT_PRO=prod_...
+WHOP_PRODUCT_STUDIO=prod_...
+```
+
+#### 6A.5 — Update Checkout URLs in the Frontend
+
+In `app/dashboard/settings/page.tsx`, find the checkout URL constants and set them to your Whop checkout links (found in each product's **Share** tab):
+
+```typescript
+const CHECKOUT_URLS = {
+  starter:        'https://whop.com/checkout/starter-link',
+  starter_annual: 'https://whop.com/checkout/starter-annual-link',
+  pro:            'https://whop.com/checkout/pro-link',
+  pro_annual:     'https://whop.com/checkout/pro-annual-link',
+  studio:         'https://whop.com/checkout/studio-link',
+  studio_annual:  'https://whop.com/checkout/studio-annual-link',
+}
+```
+
+---
+
+### Option B — Stripe (Alternative)
+
+Use Stripe if you prefer self-hosted payments. **Do not set `WHOP_WEBHOOK_SECRET`** — Whop takes priority when it's present.
+
+#### 6B.1 — Create Stripe Products
+
+1. Go to [dashboard.stripe.com](https://dashboard.stripe.com/) → **Products**
+2. Create products for Starter, Pro, and Studio plans
+3. Copy each **Price ID** (starts with `price_`)
+
+#### 6B.2 — Enable the Billing Portal
+
+1. Go to **Settings → Billing → Customer portal**
+2. Enable it and configure the features (cancel, upgrade, etc.)
+
+#### 6B.3 — Set Up the Webhook
+
+1. Go to **Developers → Webhooks → Add endpoint**
+2. URL: `https://your-backend.vercel.app/api/webhooks/stripe`
+3. Select events: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`
+4. Copy the **Signing Secret** → `STRIPE_WEBHOOK_SECRET`
+
+#### 6B.4 — Set Env Vars
+
+```env
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
 ---
@@ -418,6 +547,19 @@ npm install
 - [ ] Test signup returns a user and API key
 - [ ] User visible in Supabase Table Editor
 
+**Billing (Whop)**
+- [ ] Whop account created
+- [ ] Products created (Starter, Pro, Studio)
+- [ ] Webhook endpoint registered (`/api/webhooks/whop`)
+- [ ] `WHOP_WEBHOOK_SECRET` and product IDs set in Vercel env vars
+- [ ] Checkout URLs updated in frontend settings page
+- [ ] Test webhook delivery from Whop dashboard
+
+**Email**
+- [ ] Domain verified in Resend
+- [ ] `welcome`, `verify-email`, `password-reset` templates configured
+- [ ] Test welcome email fires on new signup
+
 ---
 
 ## Resources
@@ -427,6 +569,8 @@ npm install
 - [Anthropic API Docs](https://docs.anthropic.com/)
 - [Resend Documentation](https://resend.com/docs)
 - [TypeScript Handbook](https://www.typescriptlang.org/docs/)
+- [Whop Developer Docs](https://dev.whop.com/)
+- [Stripe Documentation](https://stripe.com/docs)
 
 ---
 
