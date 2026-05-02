@@ -66,7 +66,19 @@ npm audit fix
 1. Go to **Project Settings → API**
 2. Copy the **Project URL**, **anon public** key, and **service_role** key
 
-### 3.3 Create Database Tables
+### 3.3 Run Database Migrations
+
+If you already have the tables from a previous setup, run these ALTER statements to add new columns:
+
+```sql
+-- Add Discord bot token storage (run once)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_bot_token TEXT;
+
+-- Add low-credits email tracking (run once)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS low_credits_email_sent BOOLEAN DEFAULT false;
+```
+
+### 3.4 Create Database Tables (fresh setup)
 
 In the Supabase **SQL Editor**, run:
 
