@@ -94,7 +94,9 @@ export async function POST(request: NextRequest) {
     const prompt: string       = body.prompt ?? body.message ?? '';
     const type: string         = body.type   ?? 'script';   // 'script' | 'ui' | 'image'
     const step: string         = body.step   ?? 'generate'; // image only: 'refine' | 'generate'
-    const conversationId: string | undefined = body.conversation_id ?? body.conversationId;
+    const rawConvId: string | undefined = body.conversation_id ?? body.conversationId;
+    // Strip out frontend placeholder IDs (local_xxx) — only accept real UUIDs
+    const conversationId = rawConvId && !rawConvId.startsWith('local_') ? rawConvId : undefined;
 
     if (!prompt) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
