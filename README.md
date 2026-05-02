@@ -8,6 +8,8 @@ Note: This is the backend API only. The full Revro platform is available at http
 
 AI-powered platform for Roblox and Discord creators. Generate scripts, UI elements, and Discord server setups with AI.
 
+For support, updates, and early features, join the Discord:
+https:/discord.gg/vV2USr9phF
 ## Features
 
 - **AI Script Generation** — Generate Roblox Lua scripts using Claude AI
