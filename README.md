@@ -1,26 +1,23 @@
-## License
-
-This project is open source. Feel free to use, modify, and learn from the code.
-
-Note: This is the backend API only. The full Revro platform is available at https://revro.dev
-
 # Revro Backend
 
 AI-powered platform for Roblox and Discord creators. Generate scripts, UI elements, and Discord server setups with AI.
 
-For support, updates, and early features, join the Discord:
-https://discord.gg/vV2USr9phF
+For support, updates, and early features, join the Discord: https://discord.gg/vV2USr9phF
+
+---
+
 ## Features
 
 - **AI Script Generation** — Generate Roblox Lua scripts using Claude AI
 - **UI Creation** — Create Roblox UI elements with AI assistance
 - **Discord Bot Setup** — Configure Discord servers with AI-powered tools
-- **Roblox Studio Plugin** — Direct integration with Studio via plugin server
 - **Credit System** — Usage-based pricing with multiple subscription tiers
 - **API Key Authentication** — Secure API key system for plugin integration
 - **Email Notifications** — Automated emails for signup, low credits, and usage reports
 
-## ️ Tech Stack
+---
+
+## Tech Stack
 
 - **Framework:** Next.js 14 (App Router)
 - **Language:** TypeScript
@@ -28,8 +25,11 @@ https://discord.gg/vV2USr9phF
 - **Authentication:** Supabase Auth
 - **AI:** Anthropic Claude API (Sonnet 4.5, 4.6, Opus 4.6)
 - **Email:** Resend
+- **Payments:** Stripe
 - **Hosting:** Vercel
-- **Plugin Server:** Node.js (deployed on Render)
+- **Monitoring:** Sentry (optional)
+
+---
 
 ## Prerequisites
 
@@ -37,7 +37,10 @@ https://discord.gg/vV2USr9phF
 - Supabase account
 - Anthropic API key
 - Resend API key
+- Stripe account (test mode)
 - Vercel account (for deployment)
+
+---
 
 ## Environment Variables
 
@@ -45,65 +48,77 @@ Create a `.env.local` file in the root directory:
 
 ```env
 # Supabase
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your_supabase_service_role_key
 
-# Anthropic
-CLAUDE_API_KEY=your_anthropic_api_key
+# Anthropic Claude
+CLAUDE_API_KEY=sk-ant-your_key_here
 
-# Resend
-RESEND_API_KEY=your_resend_api_key
+# OpenAI
+OPENAI_API_KEY=sk-your_key_here
 
-# Plugin Server
-PLUGIN_SERVER_URL=https://your-app.onrender.com
-PLUGIN_SHARED_SECRET=your_64_char_hex_secret
+# Resend Email
+RESEND_API_KEY=re_your_key_here
+
+# Stripe
+STRIPE_SECRET_KEY=sk_test_your_key_here
+
+# Environment
+NODE_ENV=production
 
 # Sentry (optional)
 NEXT_PUBLIC_SENTRY_DSN=your_sentry_dsn
 
-# App
+# App URL
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-## Installation
+See `.env.example` for a complete list with descriptions.
 
-1. Clone the repository
+---
+
+## Quick Start
+
+### 1. Clone the repository
 
 ```bash
-github.com/reqsery/revro-backend
-cd revro-backend/revro-nextjs-backend
+git clone https://github.com/reqsery/revro-backend.git
+cd revro-backend
 ```
 
-2. Install dependencies
+### 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-3. Set up environment variables
+### 3. Set up environment variables
 
 ```bash
 cp .env.example .env.local
 # Edit .env.local with your actual values
 ```
 
-4. Set up Supabase database — go to your Supabase project and run the SQL migrations in `/database/schema.sql`, or manually create tables (see SETUP-GUIDE.md).
+### 4. Set up Supabase database
 
-5. Run the development server
+Go to your Supabase project and run the SQL migrations in `/database/schema.sql`.
+
+### 5. Run development server
 
 ```bash
 npm run dev
 ```
 
-The API will be available at `http://localhost:3000`.
+The API will be available at http://localhost:3000
 
-## ️ Database Schema
+---
 
-### Tables
+## Database Schema
 
 | Table | Purpose |
-|---|---|
+|-------|---------|
 | `users` | User accounts and subscription info |
 | `api_keys` | User API keys for plugin authentication |
 | `conversations` | AI chat conversation history |
@@ -112,52 +127,74 @@ The API will be available at `http://localhost:3000`.
 | `discord_connections` | Discord bot connections |
 | `roblox_connections` | Roblox plugin connections |
 | `user_settings` | User preferences |
-| `generated_bots` | Discord bots created by users |
 
 Row Level Security (RLS) is enabled on all tables. The service role has full access; authenticated users can only access their own data.
+
+---
 
 ## API Endpoints
 
 See [API-DOCS.md](./API-DOCS.md) for complete endpoint documentation.
 
-**Authentication:**
+### Authentication
 - `POST /api/auth/signup` — Create new account
 - `POST /api/auth/login` — Login to existing account
 
-**User:**
+### User Management
 - `GET /api/user/me` — Get current user info
 - `GET /api/user/usage` — Get usage statistics
 
-**AI Chat:**
+### AI Chat
 - `POST /api/chat/roblox` — Generate Roblox scripts/UI
 - `POST /api/chat/discord` — Generate Discord configs
 - `GET /api/chat/conversations` — Get conversation history
 
-**Plugin:**
-- `POST /api/plugin/task` — Send task to Roblox Studio plugin
+### Example Request
+
+```bash
+curl -H "x-api-key: your_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Create a kill brick script"}' \
+  https://your-backend-url.vercel.app/api/chat/roblox
+```
+
+---
 
 ## Authentication
 
 Revro uses two authentication methods:
 
-1. **Supabase Auth (Web)** — JWT tokens for web dashboard
-2. **API Keys (Plugin)** — Secure API keys for Roblox Studio plugin
+### 1. Supabase Auth (Web Dashboard)
+JWT tokens for web-based authentication. Users sign up with email/password or Google OAuth.
 
-Include the API key in requests:
+### 2. API Keys (Roblox Studio Plugin)
+Secure API keys for plugin authentication. Each user gets an API key on signup.
 
+**Include API key in requests:**
 ```bash
 curl -H "x-api-key: your_api_key_here" \
- https://api.revro.dev/api/chat/roblox
+  https://your-backend-url.vercel.app/api/user/me
 ```
+
+---
 
 ## Credit System
 
 | Plan | Price | Credits/Month | AI Model | Images |
 |------|-------|---------------|----------|--------|
 | Free | $0 | 25 | Sonnet 4.5 | 0 |
-| Starter | $10 ($9/yr) | 150 | Sonnet 4.6 | 0 |
-| Pro | $20 ($17/yr) | 500 | Opus 4.6 | 50 |
-| Studio | $50 ($42/yr) | 1500 | Opus 4.6 | 150 |
+| Starter | $10/mo ($9/yr) | 150 | Sonnet 4.6 | 0 |
+| Pro | $20/mo ($17/yr) | 500 | Opus 4.6 | 50 |
+| Studio | $50/mo ($42/yr) | 1500 | Opus 4.6 | 150 |
+
+### Credit Costs
+- Simple script: 2-5 credits
+- Medium script: 5-10 credits
+- Complex system: 10-15 credits
+- UI element: 5-15 credits
+- Image generation: 5 credits
+
+---
 
 ## Email Templates
 
@@ -171,86 +208,136 @@ Automated emails are sent for:
 - **Payment Confirmation** — Receipt after purchase
 - **Subscription Cancelled** — Cancellation confirmation
 
+---
+
 ## Deployment
 
-### Vercel (Main Backend)
+### Deploy to Vercel (Recommended)
 
-1. Connect the GitLab repository to Vercel
-2. Add environment variables in the Vercel dashboard
-3. Deploy — Vercel auto-deploys on push to `main`
+1. **Sign in to Vercel**
+   - Go to [vercel.com](https://vercel.com)
+   - Sign in with GitHub
 
-Build settings: Framework: Next.js, Build command: `npm run build`, Output: `.next`
+2. **Import Project**
+   - Click "Add New..." → "Project"
+   - Select `revro-backend` from your repositories
+   - Click Import
 
-### Render (Plugin Server)
+3. **Configure**
+   - Framework Preset: Next.js (auto-detected)
+   - Root Directory: `.` (leave as-is)
+   - Build Command: `npm run build` (auto-filled)
+   - Output Directory: `.next` (auto-filled)
 
-1. Create a Render project
-2. Connect via Railway CLI or GitHub
-3. Add environment variables
-4. Deploy
+4. **Add Environment Variables**
+   - Click "Environment Variables"
+   - Add all variables from your `.env.local` file
+   - Make sure to include both `SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_URL`
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
+5. **Deploy**
+   - Click Deploy
+   - Wait 3-5 minutes
+   - Your backend will be live at `https://your-project.vercel.app`
+
+6. **Auto-Deploy**
+   - Vercel automatically deploys on every push to `main`
+   - No additional configuration needed
+
+---
 
 ## Testing
 
+### Test Signup
 ```bash
-# Test signup
 curl -X POST http://localhost:3000/api/auth/signup \
- -H "Content-Type: application/json" \
- -d '{"email":"test@example.com","password":"testpass123","displayName":"Test User"}'
-
-# Test with API key
-curl -H "x-api-key: your_api_key" \
- http://localhost:3000/api/user/me
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@example.com",
+    "password": "testpass123",
+    "displayName": "Test User"
+  }'
 ```
+
+### Test with API Key
+```bash
+curl -H "x-api-key: your_api_key" \
+  http://localhost:3000/api/user/me
+```
+
+### Test AI Generation
+```bash
+curl -X POST http://localhost:3000/api/chat/roblox \
+  -H "x-api-key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Create a simple part that changes color"}'
+```
+
+---
 
 ## Project Structure
 
 ```
-revro-nextjs-backend/
+revro-backend/
 ├── app/
-│  ├── api/
-│  │  ├── auth/      # Authentication endpoints
-│  │  ├── chat/      # AI chat endpoints
-│  │  ├── plugin/     # Plugin communication
-│  │  └── user/      # User management
-│  └── layout.tsx
+│   ├── api/
+│   │   ├── auth/           # Authentication endpoints
+│   │   ├── chat/           # AI chat endpoints
+│   │   ├── plugin/         # Plugin communication
+│   │   └── user/           # User management
+│   ├── layout.tsx          # Root layout
+│   └── global-error.tsx    # Global error handler
 ├── lib/
-│  ├── supabase.ts     # Supabase client
-│  ├── claude.ts      # Claude AI integration
-│  ├── credits.ts     # Credit system logic
-│  ├── email.ts      # Email templates & sending
-│  └── auth.ts       # Auth middleware
-├── .env.example
-├── .env.local
-├── next.config.js
-├── package.json
-├── tsconfig.json
-└── README.md
+│   ├── supabase.ts         # Supabase client configuration
+│   ├── claude.ts           # Claude AI integration
+│   ├── credits.ts          # Credit system logic
+│   ├── email.ts            # Email templates & sending
+│   └── auth.ts             # Auth middleware
+├── .env.example            # Environment variables template
+├── next.config.js          # Next.js configuration
+├── package.json            # Dependencies
+├── tsconfig.json           # TypeScript configuration
+└── README.md               # This file
 ```
 
-## Debugging
+---
 
-**"Failed to create user profile"** — Check Supabase RLS policies and verify `SUPABASE_SERVICE_ROLE_KEY` is set.
+## Troubleshooting
 
-**"Unauthorized"** — API key is missing or invalid, or JWT token has expired.
+See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for common issues and solutions.
 
-**Emails not sending** — Check `RESEND_API_KEY`, verify the sender domain in Resend dashboard, and check Vercel runtime logs.
+**Quick Fixes:**
+- **Build errors:** Check all env vars are set, especially both Supabase URL versions
+- **Unauthorized errors:** Verify `SUPABASE_SERVICE_KEY` is correct
+- **Email not sending:** Check `RESEND_API_KEY` and verify sender domain
+- **Module not found:** Run `npm install` and ensure path aliases are configured
 
-Enable debug logs by adding `DEBUG=true` to `.env.local`.
+---
+
+## Contributing
+
+This is a proprietary project, but bug reports and suggestions are welcome.
+
+1. Join our [Discord](https://discord.gg/vV2USr9phF)
+2. Report issues on GitHub
+3. Email support@revro.dev
+
+---
 
 ## License
 
-Proprietary — All rights reserved.
+MIT License - see [LICENSE](./LICENSE) for details.
+
+---
 
 ## Links
 
 - **Website:** https://revro.dev
 - **Support:** support@revro.dev
+- **Discord:** https://discord.gg/vV2USr9phF
+- **Twitter:** [@RevroDev](https://twitter.com/RevroDev)
 
 ---
 
-Built with ️ for Roblox and Discord creators
+**Built with care for Roblox and Discord creators**
 
----
-
-Last updated: April 2026
+*Last updated: April 2026*
