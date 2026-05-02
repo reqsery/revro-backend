@@ -33,6 +33,26 @@ Key guidelines:
 
 When planning a server, provide a clear, organized blueprint that can be executed step-by-step.`;
 
+/** Streaming version — returns an Anthropic MessageStream you can iterate over. */
+export function streamClaude(
+  model: string,
+  userMessage: string,
+  context: 'roblox' | 'discord' = 'roblox',
+  conversationHistory: any[] = []
+) {
+  const systemPrompt = context === 'roblox' ? ROBLOX_SYSTEM_PROMPT : DISCORD_SYSTEM_PROMPT;
+  const messages = [
+    ...conversationHistory,
+    { role: 'user' as const, content: userMessage },
+  ];
+  return anthropic.messages.stream({
+    model,
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages,
+  });
+}
+
 export async function callClaude(
   model: string,
   userMessage: string,
