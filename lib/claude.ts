@@ -71,9 +71,9 @@ export async function callClaude(
 
 // Model mapping (use actual Anthropic model IDs)
 export const MODEL_IDS = {
-  'claude-sonnet-4-5': 'claude-sonnet-4-20250514',
-  'claude-sonnet-4-6': 'claude-sonnet-4-20250514', // Update when 4.6 releases
-  'claude-opus-4-6': 'claude-opus-4-20250514' // Update when 4.6 releases
+  'claude-sonnet-4-5': 'claude-sonnet-4-5-20251001',
+  'claude-sonnet-4-6': 'claude-sonnet-4-6',
+  'claude-opus-4-6':   'claude-opus-4-6',
 };
 
 export function getActualModelId(planModel: string): string {

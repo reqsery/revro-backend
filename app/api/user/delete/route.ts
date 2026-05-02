@@ -35,6 +35,11 @@ export async function POST(request: NextRequest) {
     deletion_date: deletionDateStr,
   });
 
+  // Revoke all active sessions immediately
+  await supabaseAdmin.auth.admin.signOut(user.id, 'global').catch(err =>
+    console.error('[Delete] Failed to revoke session:', err)
+  );
+
   return NextResponse.json({
     message: 'Account deletion scheduled',
     deletionDate: deletionDate.toISOString(),
