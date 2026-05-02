@@ -12,8 +12,7 @@ export const dynamic = 'force-dynamic';
 
 type StripeInstance = InstanceType<typeof Stripe>;
 
-// Initialised lazily so the module doesn't crash at import time if the key
-// isn't set (e.g. when LemonSqueezy is used instead).
+// Initialised lazily so the module doesn't crash at import time if the key isn't set.
 function getStripe(): StripeInstance {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY is not configured');

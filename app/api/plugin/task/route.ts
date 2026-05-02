@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import axios from 'axios';
 
+export const dynamic = 'force-dynamic';
+
 const PLUGIN_SERVER_URL = process.env.PLUGIN_SERVER_URL || 'http://localhost:3600';
 const SHARED_SECRET = process.env.PLUGIN_SHARED_SECRET;
 

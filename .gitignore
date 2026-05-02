@@ -9,3 +9,6 @@ build/
 .vercel
 .next/
 *.log
+next-env.d.ts
+tsconfig.tsbuildinfo
+git
