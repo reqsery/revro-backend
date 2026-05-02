@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
+import { deductCredits, tokensToCreditCost, getModelForPlan } from '@/lib/credits';
 import { callClaude, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -51,18 +51,22 @@ export async function POST(request: NextRequest) {
       history = msgs ?? []
     }
 
-    const cost = CREDIT_COSTS.PLANNING
-
     // Prepend guild context to the prompt so the AI tailors advice to that server
     const fullPrompt = guildName
       ? `[Setting up Discord server: "${guildName}" (ID: ${guildId})]\n\n${prompt}`
       : prompt
 
-    const aiResponse  = await callClaude(actualModel, fullPrompt, 'discord', history)
+    const aiResponse = await callClaude(actualModel, fullPrompt, 'discord', history)
+
+    // Token-based billing — same model as Roblox routes, minimum 1 credit
+    const totalTokens = (aiResponse.usage?.input_tokens ?? 0) + (aiResponse.usage?.output_tokens ?? 0)
+    const cost        = totalTokens > 0 ? tokensToCreditCost(planModel, totalTokens) : 1
+
     const creditResult = await deductCredits(user.id, cost, 'discord_generation', {
       model: planModel,
       actualModel,
-      messageLength: prompt.length,
+      input_tokens:  aiResponse.usage?.input_tokens,
+      output_tokens: aiResponse.usage?.output_tokens,
     })
 
     const { explanation, config } = parseDiscordResponse(aiResponse.content)
@@ -93,6 +97,7 @@ export async function POST(request: NextRequest) {
           content: aiResponse.content,
           model_used: planModel,
           credits_cost: cost,
+          tokens_used: totalTokens,
         })
         .select('id')
         .single()
