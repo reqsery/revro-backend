@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
+// CREDIT_COSTS is only used for IMAGE (DALL-E has no token data); everything else is token-based
 import { callClaude, streamClaude, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -8,14 +9,22 @@ export const dynamic = 'force-dynamic';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function refineImagePrompt(model: string, userPrompt: string): Promise<string> {
+async function refineImagePrompt(
+  model: string,
+  planModel: string,
+  userPrompt: string
+): Promise<{ content: string; cost: number }> {
   const result = await callClaude(
     model,
     `Write a concise, vivid DALL-E 3 image prompt for this Roblox game asset request: ${userPrompt}. Output only the image prompt, no explanation.`,
     'roblox',
     []
   );
-  return result.content.trim();
+  const totalTokens = (result.usage?.input_tokens ?? 0) + (result.usage?.output_tokens ?? 0);
+  return {
+    content: result.content.trim(),
+    cost: totalTokens > 0 ? tokensToCreditCost(planModel, totalTokens) : 0.1,
+  };
 }
 
 async function generateImage(prompt: string): Promise<string> {
@@ -115,9 +124,8 @@ export async function POST(request: NextRequest) {
 
     // ── Image: refine ─────────────────────────────────────────────────────────
     if (type === 'image' && step === 'refine') {
-      const cost = CREDIT_COSTS.SCRIPT_SIMPLE;
+      const { content: refinedPrompt, cost } = await refineImagePrompt(actualModel, planModel, prompt);
       const creditResult = await deductCredits(user.id, cost, 'image_refine', { model: planModel });
-      const refinedPrompt = await refineImagePrompt(actualModel, prompt);
 
       return NextResponse.json({
         response: {
@@ -158,7 +166,7 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single();
 
-    if (!creditCheck || (creditCheck.credits_total - creditCheck.credits_used) < 1) {
+    if (!creditCheck || (creditCheck.credits_total - creditCheck.credits_used) <= 0) {
       return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
     }
 
@@ -203,7 +211,7 @@ export async function POST(request: NextRequest) {
           const totalTokens = inputTokens + outputTokens;
           const tokenCost   = totalTokens > 0
             ? tokensToCreditCost(planModel, totalTokens)
-            : (type === 'ui' ? CREDIT_COSTS.UI_MEDIUM : CREDIT_COSTS.SCRIPT_MEDIUM); // fallback
+            : 0.1; // near-zero fallback if token data somehow missing
 
           const creditResult = await deductCredits(user.id, tokenCost, `${type}_generation`, {
             model: planModel,

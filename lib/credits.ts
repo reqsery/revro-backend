@@ -31,10 +31,14 @@ export const TOKEN_RATES: Record<string, number> = {
   'claude-opus-4-6':    500,
 };
 
-/** Convert raw token count to credits for a given plan model. Minimum 1. */
+/**
+ * Convert raw token count to exact decimal credits for a given plan model.
+ * Returns a float rounded to 4 decimal places — e.g. 700 tokens on free plan = 0.7 credits.
+ * No rounding up, no minimum — you pay exactly for what you use.
+ */
 export function tokensToCreditCost(planModel: string, totalTokens: number): number {
   const rate = TOKEN_RATES[planModel] ?? 1000;
-  return Math.max(1, Math.ceil(totalTokens / rate));
+  return Math.round((totalTokens / rate) * 10000) / 10000; // 4dp precision
 }
 
 // Plan configuration with Claude models
