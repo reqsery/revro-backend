@@ -22,6 +22,10 @@ module.exports = withSentryConfig(nextConfig, {
   // https://www.npmjs.com/package/@sentry/webpack-plugin#options
   org: "revro",
   project: "revro-backend",
+  // Auth token for uploading source maps to Sentry.
+  // Set SENTRY_AUTH_TOKEN in your environment / Vercel dashboard.
+  // Without it, source maps won't upload but the build still succeeds.
+  authToken: process.env.SENTRY_AUTH_TOKEN,
   // Only print logs for uploading source maps in CI
   silent: !process.env.CI,
   // For all available options, see:

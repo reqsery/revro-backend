@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
+// Import the full Stripe namespace from the core module so sub-types like
+// Stripe.Customer, Stripe.Subscription, etc. are accessible.
+import type { Stripe as StripeTypes } from 'stripe/cjs/stripe.core';
 import { supabaseAdmin } from '@/lib/supabase';
 import { PLAN_CONFIG } from '@/lib/credits';
 
@@ -7,9 +10,11 @@ export const dynamic = 'force-dynamic';
 
 // ── Stripe client ─────────────────────────────────────────────────────────────
 
+type StripeInstance = InstanceType<typeof Stripe>;
+
 // Initialised lazily so the module doesn't crash at import time if the key
 // isn't set (e.g. when LemonSqueezy is used instead).
-function getStripe(): Stripe {
+function getStripe(): StripeInstance {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY is not configured');
   return new Stripe(key, { apiVersion: '2026-04-22.dahlia' });
@@ -115,21 +120,21 @@ async function downgradeToFree(userId: string): Promise<void> {
 
 // Resolve a customer email from a Stripe customer ID or object.
 async function resolveEmail(
-  stripe: Stripe,
-  customer: string | Stripe.Customer | Stripe.DeletedCustomer | null,
+  stripe: StripeInstance,
+  customer: string | StripeTypes.Customer | StripeTypes.DeletedCustomer | null,
 ): Promise<string | null> {
   if (!customer) return null;
 
   // Already expanded
   if (typeof customer === 'object' && 'email' in customer) {
-    return (customer as Stripe.Customer).email?.toLowerCase() ?? null;
+    return (customer as StripeTypes.Customer).email?.toLowerCase() ?? null;
   }
 
   // Fetch by ID
   try {
     const c = await stripe.customers.retrieve(customer as string);
     if (c.deleted) return null;
-    return (c as Stripe.Customer).email?.toLowerCase() ?? null;
+    return (c as StripeTypes.Customer).email?.toLowerCase() ?? null;
   } catch {
     return null;
   }
@@ -149,13 +154,13 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const signature = request.headers.get('stripe-signature') ?? '';
 
-  let stripe: Stripe;
-  let event: Stripe.Event;
+  let stripe: StripeInstance;
+  let event: StripeTypes.Event;
 
   try {
     stripe = getStripe();
     // constructEvent throws if the signature is invalid
-    event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+    event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret) as StripeTypes.Event;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[Stripe] Signature verification failed: ${message}`);
@@ -169,7 +174,7 @@ export async function POST(request: NextRequest) {
 
       // ── Subscription created ───────────────────────────────────────────
       case 'customer.subscription.created': {
-        const sub = event.data.object as Stripe.Subscription;
+        const sub = event.data.object as StripeTypes.Subscription;
         const priceId = sub.items.data[0]?.price?.id ?? '';
         const plan    = planFromPriceId(priceId);
 
@@ -191,7 +196,7 @@ export async function POST(request: NextRequest) {
 
       // ── Subscription updated (upgrade / downgrade) ─────────────────────
       case 'customer.subscription.updated': {
-        const sub     = event.data.object as Stripe.Subscription;
+        const sub     = event.data.object as StripeTypes.Subscription;
         const priceId = sub.items.data[0]?.price?.id ?? '';
         const plan    = planFromPriceId(priceId);
 
@@ -217,7 +222,7 @@ export async function POST(request: NextRequest) {
 
       // ── Subscription deleted / cancelled ───────────────────────────────
       case 'customer.subscription.deleted': {
-        const sub   = event.data.object as Stripe.Subscription;
+        const sub   = event.data.object as StripeTypes.Subscription;
         const email = await resolveEmail(stripe, sub.customer);
         if (!email) { console.error('[Stripe] Could not resolve customer email'); break; }
 
@@ -231,7 +236,7 @@ export async function POST(request: NextRequest) {
 
       // ── Invoice paid = billing cycle renewed ───────────────────────────
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice;
+        const invoice = event.data.object as StripeTypes.Invoice;
 
         // Only act on subscription renewals, not one-time charges
         if (invoice.billing_reason !== 'subscription_cycle' &&
@@ -245,7 +250,7 @@ export async function POST(request: NextRequest) {
 
         // Determine plan from the invoice line item (Stripe v22: pricing.price_details.price)
         const rawPrice = invoice.lines?.data?.[0]?.pricing?.price_details?.price;
-        const priceId = typeof rawPrice === 'string' ? rawPrice : (rawPrice as Stripe.Price | undefined)?.id ?? '';
+        const priceId = typeof rawPrice === 'string' ? rawPrice : (rawPrice as StripeTypes.Price | undefined)?.id ?? '';
         const planFromInvoice = planFromPriceId(priceId);
         const plan = planFromInvoice ?? (user.plan as PlanKey);
 
@@ -260,7 +265,7 @@ export async function POST(request: NextRequest) {
       case 'invoice.payment_failed': {
         // Stripe will retry automatically. Access is not revoked here —
         // subscription.deleted fires if all retries are exhausted.
-        const invoice = event.data.object as Stripe.Invoice;
+        const invoice = event.data.object as StripeTypes.Invoice;
         const email   = (invoice.customer_email ?? '').toLowerCase();
         console.warn(`[Stripe] invoice.payment_failed: ${email || '(unknown)'}`);
         break;
