@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
-import { fireResendEvent } from '@/lib/resend';
+import { sendDeletionCancelledEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +23,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to cancel account deletion' }, { status: 500 });
   }
 
-  void fireResendEvent('user.deletion_canceled', user.email, user.display_name, {
-    first_name: user.display_name,
-  });
+  void sendDeletionCancelledEmail(user.email, user.display_name);
 
   return NextResponse.json({ message: 'Account deletion cancelled' });
 }

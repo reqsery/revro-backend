@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
-import { fireResendEvent } from '@/lib/resend';
+import { sendAccountDeletionScheduledEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,10 +30,7 @@ export async function POST(request: NextRequest) {
     month: 'long', day: 'numeric', year: 'numeric',
   });
 
-  void fireResendEvent('user.deletion_scheduled', user.email, user.display_name, {
-    first_name: user.display_name,
-    deletion_date: deletionDateStr,
-  });
+  void sendAccountDeletionScheduledEmail(user.email, user.display_name, deletionDateStr);
 
   // Revoke all active sessions immediately
   await supabaseAdmin.auth.admin.signOut(user.id, 'global').catch(err =>

@@ -473,6 +473,105 @@ export async function sendPaymentFailedEmail(
   }
 }
 
+export async function sendAccountDeletionScheduledEmail(
+  email: string,
+  userName: string,
+  deletionDate: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #484848; }
+          .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+          h1 { color: #1d1c1d; font-size: 32px; margin-bottom: 20px; }
+          .warning { background-color: #fef5f1; border-left: 4px solid #e04f1a; border-radius: 4px; padding: 16px 20px; margin: 24px 0; }
+          .button { background-color: #5865F2; color: white; padding: 14px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold; }
+          .footer { color: #8898aa; font-size: 14px; margin-top: 32px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Account Deletion Scheduled</h1>
+          <p>Hi ${userName},</p>
+          <p>Your Revro account has been scheduled for deletion. All your data will be permanently removed on <strong>${deletionDate}</strong>.</p>
+          <div class="warning">
+            <strong>Changed your mind?</strong> You can cancel the deletion from your account settings within the next 30 days.
+          </div>
+          <p style="margin-top: 30px;">
+            <a href="https://revro.dev/dashboard/settings?tab=profile" class="button">Cancel Deletion</a>
+          </p>
+          <p class="footer">If you did not request this, contact <a href="mailto:support@revro.dev">support@revro.dev</a> immediately.<br><br>The Revro Team</p>
+        </div>
+      </body>
+      </html>
+    `;
+    const { error } = await resend.emails.send({
+      from: 'Revro <noreply@revro.dev>',
+      to: email,
+      subject: 'Your Revro account is scheduled for deletion',
+      html,
+    });
+    if (error) { console.error('Failed to send deletion email:', error); return { success: false, error: error.message }; }
+    return { success: true };
+  } catch (err) {
+    console.error('Error sending deletion email:', err);
+    return { success: false, error: 'Failed to send email' };
+  }
+}
+
+export async function sendDeletionCancelledEmail(
+  email: string,
+  userName: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #484848; }
+          .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+          h1 { color: #1d1c1d; font-size: 32px; margin-bottom: 20px; }
+          .success { background-color: #f0fdf4; border-left: 4px solid #22c55e; border-radius: 4px; padding: 16px 20px; margin: 24px 0; color: #166534; }
+          .button { background-color: #5865F2; color: white; padding: 14px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold; }
+          .footer { color: #8898aa; font-size: 14px; margin-top: 32px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Account Deletion Cancelled</h1>
+          <p>Hi ${userName},</p>
+          <p>Great news — your account deletion has been successfully cancelled. Your Revro account and all your data are safe.</p>
+          <div class="success">
+            Your account is fully active and nothing has been deleted.
+          </div>
+          <p style="margin-top: 30px;">
+            <a href="https://revro.dev/dashboard" class="button">Go to Dashboard</a>
+          </p>
+          <p class="footer">Questions? Contact <a href="mailto:support@revro.dev">support@revro.dev</a><br><br>The Revro Team</p>
+        </div>
+      </body>
+      </html>
+    `;
+    const { error } = await resend.emails.send({
+      from: 'Revro <noreply@revro.dev>',
+      to: email,
+      subject: 'Your Revro account deletion has been cancelled',
+      html,
+    });
+    if (error) { console.error('Failed to send deletion cancelled email:', error); return { success: false, error: error.message }; }
+    return { success: true };
+  } catch (err) {
+    console.error('Error sending deletion cancelled email:', err);
+    return { success: false, error: 'Failed to send email' };
+  }
+}
+
 export async function sendSubscriptionCancelledEmail(
   email: string,
   userName: string,

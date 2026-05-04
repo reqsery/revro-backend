@@ -70,8 +70,8 @@ export const PLAN_CONFIG = {
 };
 
 // Credits remaining at which a low-credits warning is sent per plan.
+// Free plan intentionally excluded — no email notifications for free users.
 const LOW_CREDIT_THRESHOLDS: Partial<Record<keyof typeof PLAN_CONFIG, number>> = {
-  free:    5,
   starter: 20,
   pro:     50,
   studio:  150,
@@ -175,6 +175,9 @@ export async function deductCredits(
       ).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
       // ── Credits depleted ─────────────────────────────────────────────────
+      // Skip email notifications entirely for free plan users
+      if (baseRow.plan === 'free') return;
+
       if (remaining === 0) {
         void fireResendEvent('user.credits_depleted', baseRow.email, baseRow.display_name, {
           first_name:    baseRow.display_name,

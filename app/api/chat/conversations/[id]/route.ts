@@ -7,12 +7,12 @@ export const dynamic = 'force-dynamic';
 /** GET /api/chat/conversations/[id] — fetch messages for a conversation */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
 
-  const { id } = params;
+  const { id } = await params;
 
   try {
     // Verify the conversation belongs to this user
@@ -46,12 +46,12 @@ export async function GET(
 /** DELETE /api/chat/conversations/[id] — delete a conversation */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
 
-  const { id } = params;
+  const { id } = await params;
 
   try {
     const { error } = await supabaseAdmin

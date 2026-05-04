@@ -6,7 +6,14 @@ export const dynamic = 'force-dynamic';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
-async function fetchBotGuilds(token: string) {
+interface BotGuild {
+  id: string;
+  name: string;
+  icon: string | null;
+  memberCount: number | null;
+}
+
+async function fetchBotGuilds(token: string): Promise<BotGuild[]> {
   const res = await fetch(`${DISCORD_API}/users/@me/guilds`, {
     headers: { Authorization: `Bot ${token}` },
   });
@@ -23,67 +30,72 @@ async function fetchBotGuilds(token: string) {
 /**
  * GET /api/discord/guilds
  *
- * If the user has connected their Discord account (discord_guild_ids stored),
- * returns only the servers where BOTH conditions are true:
- *   - The user is admin/owner (from their OAuth guilds)
- *   - The Revro bot is already in that server
- *
- * If not connected, returns { guilds: [], connected: false } so the frontend
- * shows a "Connect Discord" prompt instead of a server list.
+ * Returns the list of servers where the user is admin/owner.
+ * For each server, marks whether the Revro bot is present.
+ * If the user hasn't connected Discord yet → { guilds: [], connected: false }
  */
 export async function GET(request: NextRequest) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
 
-  // Read user's stored data (soft-fail if columns not yet migrated)
+  // Read user's stored Discord data
   let storedGuildIds: string[] | null = null;
   let savedGuildId:   string | null = null;
   let userBotToken:   string | null = null;
+
   try {
     const { data } = await supabaseAdmin
       .from('users')
       .select('discord_guild_ids, discord_guild_id, discord_bot_token')
       .eq('id', user.id)
       .single();
-    if (data?.discord_guild_ids) {
-      storedGuildIds = JSON.parse(data.discord_guild_ids);
-    }
-    savedGuildId = data?.discord_guild_id ?? null;
-    userBotToken = data?.discord_bot_token ?? null;
+
+    storedGuildIds = data?.discord_guild_ids ? JSON.parse(data.discord_guild_ids) : null;
+    savedGuildId   = data?.discord_guild_id ?? null;
+    userBotToken   = data?.discord_bot_token ?? null;
   } catch {}
 
-  // Bot token: prefer env var (platform-level), fall back to user's saved token
-  const token = process.env.DISCORD_BOT_TOKEN
+  // User hasn't connected their Discord account yet
+  if (!storedGuildIds || storedGuildIds.length === 0) {
+    return NextResponse.json({ guilds: [], connected: false, savedGuildId: null });
+  }
+
+  // Try to get bot guild data for enrichment (soft-fail — works without it)
+  const botToken = process.env.DISCORD_BOT_TOKEN
     || process.env.BOT_TOKEN
     || process.env.DISCORD_TOKEN
     || userBotToken;
 
-  if (!token) {
-    return NextResponse.json({ error: 'Discord bot token is not configured — set DISCORD_BOT_TOKEN in Vercel env vars or connect your bot first' }, { status: 503 });
+  const botGuildMap = new Map<string, BotGuild>();
+  if (botToken) {
+    try {
+      const botGuilds = await fetchBotGuilds(botToken);
+      for (const g of botGuilds) botGuildMap.set(g.id, g);
+    } catch (e) {
+      console.warn('[Discord guilds] Bot guild fetch failed:', e);
+    }
   }
 
-  // User hasn't connected their Discord account yet
-  if (!storedGuildIds) {
-    return NextResponse.json({ guilds: [], connected: false, savedGuildId: null });
-  }
+  // Build the guild list — enrich with bot data where available
+  const guilds = storedGuildIds.map(id => {
+    const botGuild = botGuildMap.get(id);
+    return {
+      id,
+      name:        botGuild?.name ?? `Server ${id}`,
+      icon:        botGuild?.icon ?? null,
+      memberCount: botGuild?.memberCount ?? null,
+      botPresent:  botGuildMap.has(id),
+    };
+  });
 
-  // Fetch all servers the bot is in
-  let botGuilds: Awaited<ReturnType<typeof fetchBotGuilds>>;
-  try {
-    botGuilds = await fetchBotGuilds(token);
-  } catch (e) {
-    console.error('[Discord guilds] fetch failed:', e);
-    return NextResponse.json({ error: 'Failed to fetch servers from Discord' }, { status: 502 });
-  }
-
-  // Intersection: only show guilds where user is admin AND bot is present
-  const botGuildSet = new Set(botGuilds.map(g => g.id));
-  const guilds = botGuilds.filter(g => storedGuildIds!.includes(g.id) && botGuildSet.has(g.id));
-
-  // Put the saved (previously selected) guild first
-  if (savedGuildId) {
-    guilds.sort((a, b) => (a.id === savedGuildId ? -1 : b.id === savedGuildId ? 1 : 0));
-  }
+  // Sort: saved guild first, then bot-present guilds, then the rest
+  guilds.sort((a, b) => {
+    if (a.id === savedGuildId)  return -1;
+    if (b.id === savedGuildId)  return  1;
+    if (a.botPresent && !b.botPresent) return -1;
+    if (!a.botPresent && b.botPresent) return  1;
+    return 0;
+  });
 
   return NextResponse.json({ guilds, connected: true, savedGuildId });
 }
@@ -91,7 +103,7 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/discord/guilds
  * Body: { guild_id }
- * Saves the user's chosen server to their profile for persistence.
+ * Saves the user's chosen server to their profile.
  */
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
@@ -106,7 +118,7 @@ export async function POST(request: NextRequest) {
       .update({ discord_guild_id: guild_id, updated_at: new Date().toISOString() })
       .eq('id', user.id);
   } catch (e) {
-    console.warn('[Discord guilds] Could not save guild (column may be missing):', e);
+    console.warn('[Discord guilds] Could not save guild:', e);
   }
 
   return NextResponse.json({ ok: true });
