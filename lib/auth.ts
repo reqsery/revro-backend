@@ -34,11 +34,12 @@ export async function getUser(request: NextRequest) {
       // let them through normally. The explicit "Cancel Deletion" button in settings
       // still exists for users who want the cancellation confirmation email.
       if (userData.deletion_scheduled_at) {
-        await supabaseAdmin
-          .from('users')
-          .update({ deletion_scheduled_at: null, deletion_date: null, updated_at: new Date().toISOString() })
-          .eq('id', user.id)
-          .catch(() => {});
+        try {
+          await supabaseAdmin
+            .from('users')
+            .update({ deletion_scheduled_at: null, deletion_date: null, updated_at: new Date().toISOString() })
+            .eq('id', user.id);
+        } catch {}
         return { ...userData, deletion_scheduled_at: null, deletion_date: null };
       }
       return userData;
