@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { PLAN_CONFIG } from '@/lib/credits';
+import { sendPaymentFailedEmail, sendPaymentConfirmationEmail, sendSubscriptionCancelledEmail } from '@/lib/email';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -168,7 +169,9 @@ export async function POST(request: NextRequest) {
   try {
     switch (action) {
 
-      // ── Membership activated (new purchase or renewal) ───────────────────
+      // ── membership.created / membership.went_valid ───────────────────────
+      // New purchase: upgrade plan and reset billing cycle
+      case 'membership.created':
       case 'membership.went_valid': {
         const plan = planFromProductId(membership.product_id ?? '');
         if (!plan) {
@@ -184,24 +187,26 @@ export async function POST(request: NextRequest) {
 
         const planChanged = user.plan !== plan;
         await applyPlan(user.id, plan, planChanged);
-        console.log(`[Whop] went_valid: ${userEmail} → ${plan}${planChanged ? ' (cycle reset)' : ''}`);
-        break;
-      }
+        console.log(`[Whop] ${action}: ${userEmail} → ${plan}${planChanged ? ' (cycle reset)' : ''}`);
 
-      // ── Membership deactivated (cancelled / expired) ─────────────────────
-      case 'membership.went_invalid': {
-        const user = await findUser(userEmail);
-        if (!user) {
-          console.error(`[Whop] User not found: ${userEmail}`);
-          return NextResponse.json({ error: 'User not found' }, { status: 404 });
+        // Send payment confirmation email on new purchase
+        if (planChanged) {
+          sendPaymentConfirmationEmail(
+            userEmail,
+            userEmail.split('@')[0],
+            plan.charAt(0).toUpperCase() + plan.slice(1),
+            '',   // amount not in webhook
+            'Monthly',
+            'Next billing cycle',
+            membership.id ?? '',
+          ).catch(() => {});
         }
-
-        await downgradeToFree(user.id);
-        console.log(`[Whop] went_invalid: ${userEmail} → downgraded to free`);
         break;
       }
 
-      // ── Payment succeeded = billing cycle renewed ─────────────────────────
+      // ── membership.renewed / payment.succeeded ────────────────────────────
+      // Billing cycle renewed: reset credits
+      case 'membership.renewed':
       case 'payment.succeeded': {
         const user = await findUser(userEmail);
         if (!user) {
@@ -212,15 +217,46 @@ export async function POST(request: NextRequest) {
         const plan = planFromProductId(membership.product_id ?? '') ?? (user.plan as PlanKey);
         if (!PLAN_CONFIG[plan] || plan === 'free') break;
 
-        // Always reset credits on a successful payment (new billing cycle)
         await applyPlan(user.id, plan, true);
-        console.log(`[Whop] payment.succeeded: ${userEmail} → credits reset (plan: ${plan})`);
+        console.log(`[Whop] ${action}: ${userEmail} → credits reset (plan: ${plan})`);
         break;
       }
 
-      // ── Payment failed — log only, Whop handles retries ──────────────────
+      // ── membership.cancelled / membership.expired / membership.went_invalid
+      // Downgrade to free plan
+      case 'membership.cancelled':
+      case 'membership.expired':
+      case 'membership.went_invalid': {
+        const user = await findUser(userEmail);
+        if (!user) {
+          console.error(`[Whop] User not found: ${userEmail}`);
+          return NextResponse.json({ error: 'User not found' }, { status: 404 });
+        }
+
+        const oldPlan = user.plan;
+        await downgradeToFree(user.id);
+        console.log(`[Whop] ${action}: ${userEmail} → downgraded to free`);
+
+        // Send cancellation email
+        sendSubscriptionCancelledEmail(
+          userEmail,
+          userEmail.split('@')[0],
+          oldPlan.charAt(0).toUpperCase() + oldPlan.slice(1),
+          'now',
+        ).catch(() => {});
+        break;
+      }
+
+      // ── payment.failed ────────────────────────────────────────────────────
+      // Notify user — Whop handles retries, don't revoke access yet
       case 'payment.failed': {
         console.warn(`[Whop] payment.failed: ${userEmail}`);
+        const user = await findUser(userEmail);
+        sendPaymentFailedEmail(
+          userEmail,
+          user ? (userEmail.split('@')[0]) : userEmail,
+          user ? (user.plan.charAt(0).toUpperCase() + user.plan.slice(1)) : 'your',
+        ).catch(() => {});
         break;
       }
 

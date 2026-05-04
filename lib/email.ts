@@ -254,7 +254,7 @@ export async function sendLowCreditsEmail(
     `;
 
     const { data, error } = await resend.emails.send({
-      from: 'Revro <noreply@resend.dev>',
+      from: 'Revro <noreply@revro.dev>',
       to: email,
       subject: 'Running low on Revro credits',
       html,
@@ -412,6 +412,63 @@ export async function sendPaymentConfirmationEmail(
     return { success: true };
   } catch (error) {
     console.error('Error sending payment confirmation email:', error);
+    return { success: false, error: 'Failed to send email' };
+  }
+}
+
+export async function sendPaymentFailedEmail(
+  email: string,
+  userName: string,
+  plan: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #484848; }
+          .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+          h1 { color: #1d1c1d; font-size: 36px; margin-bottom: 30px; }
+          .warning { background-color: #fef5f1; border-left: 4px solid #e04f1a; border-radius: 4px; padding: 16px 20px; margin: 24px 0; }
+          .button { background-color: #5865F2; color: white; padding: 14px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold; }
+          .footer { color: #8898aa; font-size: 14px; margin-top: 32px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Payment Failed</h1>
+          <p>Hi ${userName},</p>
+          <p>We were unable to process your payment for the <strong>${plan}</strong> plan.</p>
+          <div class="warning">
+            <strong>Action required:</strong> Please update your payment method to keep your subscription active. If no action is taken, your account may be downgraded to the Free plan.
+          </div>
+          <p style="margin-top: 30px;">
+            <a href="https://whop.com/hub" class="button">Update Payment Method</a>
+          </p>
+          <p class="footer">Questions? Contact <a href="mailto:support@revro.dev">support@revro.dev</a><br><br>The Revro Team</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const { data, error } = await resend.emails.send({
+      from: 'Revro <noreply@revro.dev>',
+      to: email,
+      subject: 'Action required: payment failed for your Revro subscription',
+      html,
+    });
+
+    if (error) {
+      console.error('Failed to send payment failed email:', error);
+      return { success: false, error: error.message };
+    }
+
+    console.log('Payment failed email sent:', data);
+    return { success: true };
+  } catch (error) {
+    console.error('Error sending payment failed email:', error);
     return { success: false, error: 'Failed to send email' };
   }
 }
