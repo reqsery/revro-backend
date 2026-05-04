@@ -5,6 +5,7 @@ import { callClaude, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // Claude can take up to 60s for long bot code
 
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
