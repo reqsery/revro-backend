@@ -9,7 +9,7 @@ function generateApiKey(): string {
   let key = '';
   const bytes = crypto.randomBytes(32);
   for (let i = 0; i < 32; i++) key += chars[bytes[i] % chars.length];
-  return key;
+  return `revro_${key}`;
 }
 
 export async function getUser(request: NextRequest) {
