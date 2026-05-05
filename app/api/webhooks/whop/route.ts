@@ -69,6 +69,22 @@ function verifySignature(rawBody: string, signature: string, secret: string): bo
  * If you have separate annual products, add:
  *   WHOP_PRODUCT_STARTER_ANNUAL, WHOP_PRODUCT_PRO_ANNUAL, WHOP_PRODUCT_STUDIO_ANNUAL
  */
+// Credit pack products — one-time purchases that top up credits_total
+// Set WHOP_PACK_SMALL / WHOP_PACK_MEDIUM / WHOP_PACK_LARGE to the Whop product IDs
+function buildCreditPackMap(): Record<string, number> {
+  const map: Record<string, number> = {};
+  const packs: [string, number][] = [
+    ['WHOP_PACK_SMALL',  50],
+    ['WHOP_PACK_MEDIUM', 150],
+    ['WHOP_PACK_LARGE',  500],
+  ];
+  for (const [envKey, credits] of packs) {
+    const id = process.env[envKey];
+    if (id) map[id] = credits;
+  }
+  return map;
+}
+
 function buildProductMap(): Record<string, PlanKey> {
   const map: Record<string, PlanKey> = {};
   const pairs: [string, PlanKey][] = [
@@ -205,7 +221,6 @@ export async function POST(request: NextRequest) {
       }
 
       // ── membership.renewed / payment.succeeded ────────────────────────────
-      // Billing cycle renewed: reset credits
       case 'membership.renewed':
       case 'payment.succeeded': {
         const user = await findUser(userEmail);
@@ -214,7 +229,29 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
-        const plan = planFromProductId(membership.product_id ?? '') ?? (user.plan as PlanKey);
+        const productId = membership.product_id ?? '';
+
+        // ── Credit pack (one-time purchase) ──────────────────────────────
+        const creditPackMap = buildCreditPackMap();
+        const packCredits   = creditPackMap[productId];
+        if (packCredits !== undefined) {
+          // Free plan users cannot buy credit packs
+          if (user.plan === 'free') {
+            console.warn(`[Whop] Credit pack rejected — user ${userEmail} is on free plan`);
+            break;
+          }
+          // Add credits on top of existing total — don't reset credits_used
+          const newTotal = user.credits_total + packCredits;
+          await supabaseAdmin
+            .from('users')
+            .update({ credits_total: newTotal, updated_at: new Date().toISOString() })
+            .eq('id', user.id);
+          console.log(`[Whop] Credit pack: ${userEmail} +${packCredits} credits (total: ${newTotal})`);
+          break;
+        }
+
+        // ── Subscription renewal — reset billing cycle ────────────────────
+        const plan = planFromProductId(productId) ?? (user.plan as PlanKey);
         if (!PLAN_CONFIG[plan] || plan === 'free') break;
 
         await applyPlan(user.id, plan, true);
