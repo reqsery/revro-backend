@@ -4,9 +4,9 @@ import { requireAuth } from '@/lib/auth';
 export const dynamic = 'force-dynamic';
 
 // DISCORD_CLIENT_ID must match the Application ID in Discord Developer Portal → General Information
-const CLIENT_ID    = process.env.DISCORD_CLIENT_ID    || '1477250434967011349';
-// DISCORD_REDIRECT_URI must be registered in Discord Developer Portal → OAuth2 → Redirects
-const REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'https://revro.dev/auth/discord/callback';
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID || '1477250434967011349';
+// Always use the production callback — must be registered in Discord Developer Portal → OAuth2 → Redirects
+const REDIRECT_URI = 'https://revro.dev/auth/discord/callback';
 
 /**
  * GET /api/discord/auth
