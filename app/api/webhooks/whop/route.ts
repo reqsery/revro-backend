@@ -18,7 +18,7 @@ interface WhopUser {
 
 interface WhopMembership {
   id: string;
-  product_id: string;
+  product_id?: string;
   plan_id?: string;
   user: WhopUser;
   valid: boolean;
@@ -69,10 +69,31 @@ function verifySignature(rawBody: string, signature: string, secret: string): bo
  * If you have separate annual products, add:
  *   WHOP_PRODUCT_STARTER_ANNUAL, WHOP_PRODUCT_PRO_ANNUAL, WHOP_PRODUCT_STUDIO_ANNUAL
  */
-// Credit pack products — one-time purchases that top up credits_total
-// Set WHOP_PACK_SMALL / WHOP_PACK_MEDIUM / WHOP_PACK_LARGE to the Whop product IDs
+// ── Hardcoded plan/product ID → plan name mappings ───────────────────────────
+// Plan IDs come from the Whop dashboard (Settings → tab: Plugin & Bot in frontend)
+// These are the plan_ids shown on the pricing page
+const PLAN_ID_MAP: Record<string, PlanKey> = {
+  // Starter
+  'plan_yCxCQdTcuq3PB': 'starter', // monthly
+  'plan_A3XtiQtFwUQO2': 'starter', // yearly
+  // Pro
+  'plan_X2F8Ukz2xXIkE': 'pro',     // monthly
+  'plan_TF2t36B0XIYCy': 'pro',     // yearly
+  // Studio
+  'plan_NJdBfHx3gQxCF': 'studio',  // monthly
+  'plan_Ynaroe3Otw4QK': 'studio',  // yearly
+};
+
+// Credit pack product IDs (one-time purchases)
+const CREDIT_PACK_MAP: Record<string, number> = {
+  'prod_bQhlR7Fonc4Oy': 50,   // Small  — $5
+  'prod_ii4z8el4KTeXA': 150,  // Medium — $12
+  'prod_ykaAhgAMdOI7Y': 500,  // Large  — $35
+};
+
 function buildCreditPackMap(): Record<string, number> {
-  const map: Record<string, number> = {};
+  // Start with hardcoded values, then layer in any env overrides
+  const map: Record<string, number> = { ...CREDIT_PACK_MAP };
   const packs: [string, number][] = [
     ['WHOP_PACK_SMALL',  50],
     ['WHOP_PACK_MEDIUM', 150],
@@ -86,6 +107,7 @@ function buildCreditPackMap(): Record<string, number> {
 }
 
 function buildProductMap(): Record<string, PlanKey> {
+  // Start with hardcoded plan IDs, then layer in any env overrides
   const map: Record<string, PlanKey> = {};
   const pairs: [string, PlanKey][] = [
     ['WHOP_PRODUCT_STARTER',        'starter'],
@@ -102,8 +124,10 @@ function buildProductMap(): Record<string, PlanKey> {
   return map;
 }
 
+/** Map a product_id OR plan_id to a plan key. Checks plan IDs first (always works),
+ *  then falls back to product IDs from env vars. */
 function planFromProductId(productId: string): PlanKey | null {
-  return buildProductMap()[productId] ?? null;
+  return PLAN_ID_MAP[productId] ?? buildProductMap()[productId] ?? null;
 }
 
 async function findUser(email: string) {
@@ -189,9 +213,10 @@ export async function POST(request: NextRequest) {
       // New purchase: upgrade plan and reset billing cycle
       case 'membership.created':
       case 'membership.went_valid': {
-        const plan = planFromProductId(membership.product_id ?? '');
+        // Try plan_id first (always hardcoded), then product_id (may need env vars)
+        const plan = planFromProductId(membership.plan_id ?? '') ?? planFromProductId(membership.product_id ?? '');
         if (!plan) {
-          console.warn(`[Whop] Unknown product_id "${membership.product_id}" — skipping`);
+          console.warn(`[Whop] Unknown plan/product: plan_id="${membership.plan_id}" product_id="${membership.product_id}" — skipping`);
           return NextResponse.json({ received: true, note: 'Unknown product, skipped' });
         }
 
@@ -229,7 +254,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
-        const productId = membership.product_id ?? '';
+        const productId = membership.product_id ?? membership.plan_id ?? '';
 
         // ── Credit pack (one-time purchase) ──────────────────────────────
         const creditPackMap = buildCreditPackMap();
@@ -251,7 +276,7 @@ export async function POST(request: NextRequest) {
         }
 
         // ── Subscription renewal — reset billing cycle ────────────────────
-        const plan = planFromProductId(productId) ?? (user.plan as PlanKey);
+        const plan = planFromProductId(membership.plan_id ?? '') ?? planFromProductId(productId) ?? (user.plan as PlanKey);
         if (!PLAN_CONFIG[plan] || plan === 'free') break;
 
         await applyPlan(user.id, plan, true);
