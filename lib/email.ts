@@ -572,6 +572,59 @@ export async function sendDeletionCancelledEmail(
   }
 }
 
+export async function sendCreatePasswordEmail(
+  email: string,
+  userName: string,
+  setPasswordUrl: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #484848; }
+          .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+          h1 { color: #1d1c1d; font-size: 32px; margin-bottom: 20px; }
+          .button { background-color: #7c3aed; color: white; padding: 14px 28px; text-decoration: none; border-radius: 10px; display: inline-block; font-weight: bold; font-size: 15px; }
+          .note { background-color: #f5f3ff; border-left: 4px solid #7c3aed; border-radius: 4px; padding: 14px 18px; margin: 24px 0; color: #4c1d95; font-size: 14px; }
+          .footer { color: #8898aa; font-size: 13px; margin-top: 32px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Set up your password</h1>
+          <p>Hi ${userName},</p>
+          <p>You asked to create a password for your Revro account so you can sign in with your email address in addition to Google.</p>
+          <p style="margin-top: 28px;">
+            <a href="${setPasswordUrl}" class="button">Create Password</a>
+          </p>
+          <div class="note">
+            This link expires in <strong>15 minutes</strong> and can only be used once.
+          </div>
+          <p class="footer">
+            If you didn't request this, you can safely ignore this email — your account is not affected.<br><br>
+            The Revro Team
+          </p>
+        </div>
+      </body>
+      </html>
+    `;
+    const { error } = await resend.emails.send({
+      from: 'Revro <noreply@revro.dev>',
+      to: email,
+      subject: 'Set up your Revro password',
+      html,
+    });
+    if (error) { console.error('[email] sendCreatePasswordEmail failed:', error); return { success: false, error: error.message }; }
+    return { success: true };
+  } catch (err) {
+    console.error('[email] sendCreatePasswordEmail error:', err);
+    return { success: false, error: 'Failed to send email' };
+  }
+}
+
 export async function sendSubscriptionCancelledEmail(
   email: string,
   userName: string,
