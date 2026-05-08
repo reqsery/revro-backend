@@ -21,14 +21,15 @@ async function getUserByApiKey(apiKey: string) {
 // Returns a session_id that the plugin uses for all subsequent calls.
 
 export async function POST(request: NextRequest) {
-  const apiKey = request.headers.get('x-api-key') ?? '';
+  const apiKey = (request.headers.get('x-api-key') ?? '').trim();
   if (!apiKey) {
     return NextResponse.json({ error: 'Missing x-api-key header' }, { status: 401 });
   }
 
   const userId = await getUserByApiKey(apiKey);
   if (!userId) {
-    return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
+    console.warn(`[Plugin/connect] Key not found (prefix: ${apiKey.slice(0, 8)})`);
+    return NextResponse.json({ error: 'Invalid API key — copy the current key from revro.dev/dashboard/settings?tab=setup' }, { status: 401 });
   }
 
   const sessionId = randomUUID();
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
 // Called by the plugin on shutdown / disconnect.
 
 export async function DELETE(request: NextRequest) {
-  const apiKey = request.headers.get('x-api-key') ?? '';
+  const apiKey = (request.headers.get('x-api-key') ?? '').trim();
   if (!apiKey) {
     return NextResponse.json({ error: 'Missing x-api-key header' }, { status: 401 });
   }

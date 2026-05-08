@@ -32,7 +32,8 @@ export async function POST(request: NextRequest) {
 
   const clientSecret = process.env.DISCORD_CLIENT_SECRET || process.env.DISCORD_SECRET;
   if (!clientSecret) {
-    return NextResponse.json({ error: 'Set DISCORD_CLIENT_SECRET in your Vercel backend env vars (Discord Developer Portal → OAuth2 → Client Secret)' }, { status: 503 });
+    console.error('[Discord exchange] DISCORD_CLIENT_SECRET env var is not set. Add it in Vercel → Backend project → Settings → Environment Variables');
+    return NextResponse.json({ error: 'Discord integration is not configured. Contact support.' }, { status: 503 });
   }
 
   // ── 1. Exchange code for access token ─────────────────────────────────────
@@ -50,8 +51,9 @@ export async function POST(request: NextRequest) {
 
   if (!tokenRes.ok) {
     const err = await tokenRes.json().catch(() => ({}));
-    console.error('[Discord exchange] Token error:', err);
-    return NextResponse.json({ error: 'Failed to exchange Discord code' }, { status: 400 });
+    console.error('[Discord exchange] Token error:', JSON.stringify(err));
+    const msg = (err.error_description as string) || (err.error as string) || 'Failed to exchange Discord code';
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 
   const { access_token } = await tokenRes.json();
