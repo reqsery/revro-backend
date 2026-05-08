@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
   const { data: keys, error } = await supabaseAdmin
     .from('api_keys')
-    .select('id, name, key, created_at, last_used_at')
+    .select('id, name, key, created_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: true });
 
@@ -36,7 +36,6 @@ export async function GET(request: NextRequest) {
       name: k.name,
       key_preview: k.key ? `${k.key.slice(0, 12)}${'•'.repeat(20)}` : '••••••••••••••••••••••••••••••••',
       created_at: k.created_at,
-      last_used_at: k.last_used_at ?? null,
     })),
   });
 }
