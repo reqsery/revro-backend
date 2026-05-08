@@ -578,39 +578,62 @@ export async function sendCreatePasswordEmail(
   setPasswordUrl: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #484848; }
-          .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
-          h1 { color: #1d1c1d; font-size: 32px; margin-bottom: 20px; }
-          .button { background-color: #7c3aed; color: white; padding: 14px 28px; text-decoration: none; border-radius: 10px; display: inline-block; font-weight: bold; font-size: 15px; }
-          .note { background-color: #f5f3ff; border-left: 4px solid #7c3aed; border-radius: 4px; padding: 14px 18px; margin: 24px 0; color: #4c1d95; font-size: 14px; }
-          .footer { color: #8898aa; font-size: 13px; margin-top: 32px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>Set up your password</h1>
-          <p>Hi ${userName},</p>
-          <p>You asked to create a password for your Revro account so you can sign in with your email address in addition to Google.</p>
-          <p style="margin-top: 28px;">
-            <a href="${setPasswordUrl}" class="button">Create Password</a>
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up your Revro password</title>
+</head>
+<body style="margin:0;padding:0;background:#09090b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;padding:48px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+
+        <!-- Logo -->
+        <tr><td style="padding-bottom:32px;text-align:center;">
+          <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Revro</span>
+        </td></tr>
+
+        <!-- Card -->
+        <tr><td style="background:#18181b;border:1px solid #27272a;border-radius:16px;padding:40px 36px;">
+
+          <p style="margin:0 0 8px;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#7c3aed;">Account Security</p>
+          <h1 style="margin:0 0 16px;font-size:26px;font-weight:700;color:#ffffff;line-height:1.2;">Set up your password</h1>
+          <p style="margin:0 0 28px;font-size:15px;color:#a1a1aa;line-height:1.6;">
+            Hi ${userName},<br><br>
+            You requested to add a password to your Revro account so you can sign in with email in addition to Google.
           </p>
-          <div class="note">
-            This link expires in <strong>15 minutes</strong> and can only be used once.
-          </div>
-          <p class="footer">
-            If you didn't request this, you can safely ignore this email — your account is not affected.<br><br>
-            The Revro Team
+
+          <!-- Button -->
+          <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+            <tr><td style="background:#7c3aed;border-radius:10px;">
+              <a href="${setPasswordUrl}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:-0.2px;">Create Password →</a>
+            </td></tr>
+          </table>
+
+          <!-- Note -->
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr><td style="background:#1c1917;border-left:3px solid #7c3aed;border-radius:4px;padding:12px 16px;">
+              <p style="margin:0;font-size:13px;color:#d4d4d8;">⏱ This link expires in <strong style="color:#ffffff;">15 minutes</strong> and can only be used once.</p>
+            </td></tr>
+          </table>
+
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="padding-top:24px;text-align:center;">
+          <p style="margin:0;font-size:12px;color:#52525b;">
+            If you didn't request this, ignore this email — your account is safe.<br>
+            <span style="color:#3f3f46;">The Revro Team</span>
           </p>
-        </div>
-      </body>
-      </html>
-    `;
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
     const { error } = await resend.emails.send({
       from: 'Revro <noreply@revro.dev>',
       to: email,
