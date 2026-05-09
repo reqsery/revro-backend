@@ -4,9 +4,9 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const CLIENT_ID    = process.env.DISCORD_CLIENT_ID || '1477250434967011349';
-// Must exactly match the redirect_uri used in /api/discord/auth
-const REDIRECT_URI = 'https://revro.dev/auth/discord/callback';
+const CLIENT_ID    = process.env.DISCORD_CLIENT_ID    || '1477250434967011349';
+// Must exactly match the redirect_uri used in /api/discord/auth AND registered in Discord Dev Portal
+const REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'https://revro.dev/auth/discord/callback';
 const DISCORD_API   = 'https://discord.com/api/v10';
 
 interface DiscordGuildRaw {
