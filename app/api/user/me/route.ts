@@ -28,6 +28,15 @@ export async function GET(request: NextRequest) {
     apiKey = keyRow?.key ?? null;
   } catch {}
 
+  // Detect whether user has email/password auth (vs OAuth-only)
+  // Needed so frontend knows whether to show "Create password" or "Change password"
+  let hasPassword = false;
+  try {
+    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(user.id);
+    const identities = authData?.user?.identities ?? [];
+    hasPassword = identities.some((id: any) => id.provider === 'email');
+  } catch {}
+
   return NextResponse.json({
     user: {
       id: user.id,
@@ -43,6 +52,7 @@ export async function GET(request: NextRequest) {
       deletion_scheduled_at: user.deletion_scheduled_at ?? null,
       deletion_date: user.deletion_date ?? null,
       api_key: apiKey,
+      has_password: hasPassword,
     }
   });
 }

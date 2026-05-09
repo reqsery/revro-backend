@@ -48,6 +48,17 @@ async function generateImage(prompt: string): Promise<string> {
   return url;
 }
 
+/** Generate a short conversation title using Claude (fire-and-forget). */
+async function generateTitle(prompt: string, response: string): Promise<string> {
+  const result = await callClaude(
+    'claude-haiku-4-5',
+    `Write a short title (3-6 words) for a Roblox scripting conversation. The user asked: "${prompt.slice(0, 300)}"\nOutput ONLY the title. No quotes. No period at the end.`,
+    'roblox',
+    [],
+  );
+  return result.content.trim().slice(0, 60) || prompt.slice(0, 50);
+}
+
 async function saveMessages(
   userId: string,
   conversationId: string | undefined,
@@ -65,6 +76,14 @@ async function saveMessages(
       .select('id')
       .single();
     convId = conv?.id ?? null;
+
+    // Async title upgrade — don't await so we don't block the response
+    if (convId) {
+      const savedConvId = convId;
+      void generateTitle(prompt, responseText)
+        .then(title => supabaseAdmin.from('conversations').update({ title }).eq('id', savedConvId))
+        .catch(() => {});
+    }
   }
 
   let messageId: string | null = null;
