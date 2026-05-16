@@ -90,18 +90,21 @@ export async function POST(request: NextRequest) {
     }
   } catch {}
 
-  // ── 4. Save to user profile (soft-fail if columns not yet migrated) ────────
-  try {
-    await supabaseAdmin
-      .from('users')
-      .update({
-        discord_guild_ids:  JSON.stringify(guildIds),
-        discord_user_id:    discordUserId,
-        updated_at:         new Date().toISOString(),
-      })
-      .eq('id', user.id);
-  } catch (e) {
-    console.warn('[Discord exchange] Could not save guild IDs (columns may be missing):', e);
+  // ── 4. Save to user profile ────────────────────────────────────────────────
+  const { error: discordUpdateErr } = await supabaseAdmin
+    .from('users')
+    .update({
+      discord_guild_ids:  JSON.stringify(guildIds),
+      discord_user_id:    discordUserId,
+      updated_at:         new Date().toISOString(),
+    })
+    .eq('id', user.id);
+
+  if (discordUpdateErr) {
+    console.error('[Discord exchange] Failed to save guild IDs:', discordUpdateErr.message);
+    return NextResponse.json({
+      error: `Discord connection failed — missing DB columns. Run the discord migration SQL in Supabase. Details: ${discordUpdateErr.message}`,
+    }, { status: 500 });
   }
 
   return NextResponse.json({
