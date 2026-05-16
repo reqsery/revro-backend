@@ -11,4 +11,4 @@ build/
 *.log
 next-env.d.ts
 tsconfig.tsbuildinfo
-git
+git.env.vercel
