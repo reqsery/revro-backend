@@ -255,6 +255,7 @@ export async function callAI(
 export const MODEL_IDS: Record<string, string> = {
   'codex-mini': 'codex-mini-latest',
   'codex-standard': 'gpt-5.1-codex',
+  'codex-advanced': 'gpt-5.1-codex',
   'codex-premium': 'gpt-5.1-codex',
 };
 

@@ -26,6 +26,7 @@ export const CREDIT_COSTS = {
 export const TOKEN_RATES: Record<string, number> = {
   'codex-mini':     2000,
   'codex-standard': 1000,
+  'codex-advanced':  800,
   'codex-premium':   600,
 };
 
@@ -50,7 +51,7 @@ export const PLAN_CONFIG = {
   starter: {
     credits: 150,
     images_max: 0,
-    model: 'codex-standard',
+    model: 'codex-advanced',
     display_name: 'Advanced AI'
   },
   pro: {
@@ -146,7 +147,13 @@ export async function deductCredits(
   // ── 3. Log usage (soft fail — wrong schema never blocks credits) ───────────
   supabaseAdmin
     .from('usage_log')
-    .insert({ user_id: userId, action: actionType, credits_used: cost, metadata })
+    .insert({
+      user_id: userId,
+      action_type: actionType,
+      credits_cost: Math.ceil(cost),
+      model_used: metadata?.model ?? metadata?.actualModel ?? null,
+      metadata,
+    })
     .then(({ error }) => {
       if (error) console.warn('[Credits] Usage log failed:', error.message);
     });
