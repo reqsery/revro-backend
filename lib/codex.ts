@@ -262,6 +262,3 @@ export const MODEL_IDS: Record<string, string> = {
 export function getActualModelId(planModel: string): string {
   return MODEL_IDS[planModel as keyof typeof MODEL_IDS] || MODEL_IDS['codex-standard'];
 }
-
-export const callClaude = callAI;
-export const streamClaude = streamAI;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan } from '@/lib/credits';
-import { callAI, getActualModelId } from '@/lib/claude';
+import { callAI, getActualModelId } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';

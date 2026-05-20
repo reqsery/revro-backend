@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
 // CREDIT_COSTS is only used for IMAGE (DALL-E has no token data); everything else is token-based
-import { callAI, streamAI, getActualModelId } from '@/lib/claude';
+import { callAI, streamAI, getActualModelId } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
