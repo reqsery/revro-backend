@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
 // CREDIT_COSTS is only used for IMAGE (DALL-E has no token data); everything else is token-based
-import { callClaude, streamClaude, getActualModelId } from '@/lib/claude';
+import { callAI, streamAI, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,7 @@ async function refineImagePrompt(
   planModel: string,
   userPrompt: string
 ): Promise<{ content: string; cost: number }> {
-  const result = await callClaude(
+  const result = await callAI(
     model,
     `Write a concise, vivid DALL-E 3 image prompt for this Roblox game asset request: ${userPrompt}. Output only the image prompt, no explanation.`,
     'roblox',
@@ -48,10 +48,10 @@ async function generateImage(prompt: string): Promise<string> {
   return url;
 }
 
-/** Generate a short conversation title using Claude (fire-and-forget). */
+/** Generate a short conversation title (fire-and-forget). */
 async function generateTitle(prompt: string, response: string): Promise<string> {
-  const result = await callClaude(
-    'claude-haiku-4-5',
+  const result = await callAI(
+    'codex-mini',
     `Write a short title (3-6 words) for a Roblox scripting conversation. The user asked: "${prompt.slice(0, 300)}"\nOutput ONLY the title. No quotes. No period at the end.`,
     'roblox',
     [],
@@ -198,9 +198,9 @@ export async function POST(request: NextRequest) {
         let outputTokens = 0;
 
         try {
-          const claudeStream = streamClaude(actualModel, prompt, 'roblox', history);
+          const aiStream = streamAI(actualModel, prompt, 'roblox', history);
 
-          for await (const chunk of claudeStream) {
+          for await (const chunk of aiStream) {
             // Stop if client disconnected — don't charge
             if (clientCancelled) break;
 

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan } from '@/lib/credits';
-import { callClaude, getActualModelId } from '@/lib/claude';
+import { callAI, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // Claude can take up to 60s for long bot code
+export const maxDuration = 60; // Long bot code generation can take up to 60s
 
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const actualModel = getActualModelId(planModel);
 
     const fullPrompt = `Create a Discord bot named "${botName}". ${prompt}`;
-    const aiResponse = await callClaude(actualModel, fullPrompt, 'bot', []);
+    const aiResponse = await callAI(actualModel, fullPrompt, 'bot', []);
 
     const totalTokens = (aiResponse.usage?.input_tokens ?? 0) + (aiResponse.usage?.output_tokens ?? 0);
     const cost = totalTokens > 0 ? tokensToCreditCost(planModel, totalTokens) : 1;

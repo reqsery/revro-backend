@@ -54,6 +54,24 @@ export async function DELETE(
   const { id } = await params;
 
   try {
+    const { data: conv, error: convErr } = await supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (convErr || !conv) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
+
+    const { error: messagesErr } = await supabaseAdmin
+      .from('messages')
+      .delete()
+      .eq('conversation_id', id);
+
+    if (messagesErr) throw messagesErr;
+
     const { error } = await supabaseAdmin
       .from('conversations')
       .delete()

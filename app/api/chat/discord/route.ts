@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan } from '@/lib/credits';
-import { callClaude, getActualModelId } from '@/lib/claude';
+import { callAI, getActualModelId } from '@/lib/claude';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-/** Try to pull a JSON block out of Claude's response, return the rest as explanation. */
+/** Try to pull a JSON block out of the AI response, return the rest as explanation. */
 function parseDiscordResponse(raw: string): { explanation: string; config?: any } {
   const match = raw.match(/```(?:json)?\n([\s\S]*?)```/)
   if (match) {
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       ? `[Setting up Discord server: "${guildName}" (ID: ${guildId})]\n\n${prompt}`
       : prompt
 
-    const aiResponse = await callClaude(actualModel, fullPrompt, 'discord', history)
+    const aiResponse = await callAI(actualModel, fullPrompt, 'discord', history)
 
     // Token-based billing — same model as Roblox routes, minimum 1 credit
     const totalTokens = (aiResponse.usage?.input_tokens ?? 0) + (aiResponse.usage?.output_tokens ?? 0)

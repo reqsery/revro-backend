@@ -1,32 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getPluginApiKey, getUserIdByPluginApiKey } from '@/lib/plugin-auth';
 import { randomUUID } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function getUserByApiKey(apiKey: string) {
-  const { data, error } = await supabaseAdmin
-    .from('api_keys')
-    .select('user_id')
-    .eq('key', apiKey)
-    .single();
-  if (error || !data) return null;
-  return data.user_id as string;
-}
-
 // ── POST /api/plugin/connect ──────────────────────────────────────────────────
 // Called by the Roblox Studio plugin on startup.
 // Returns a session_id that the plugin uses for all subsequent calls.
 
 export async function POST(request: NextRequest) {
-  const apiKey = (request.headers.get('x-api-key') ?? '').trim();
+  const apiKey = getPluginApiKey(request);
   if (!apiKey) {
-    return NextResponse.json({ error: 'Missing x-api-key header' }, { status: 401 });
+    return NextResponse.json({ error: 'Missing API key' }, { status: 401 });
   }
 
-  const userId = await getUserByApiKey(apiKey);
+  const userId = await getUserIdByPluginApiKey(apiKey);
   if (!userId) {
     console.warn(`[Plugin/connect] Key not found (prefix: ${apiKey.slice(0, 8)})`);
     return NextResponse.json({ error: 'Invalid API key — copy the current key from revro.dev/dashboard/settings?tab=setup' }, { status: 401 });
@@ -66,12 +57,12 @@ export async function POST(request: NextRequest) {
 // Called by the plugin on shutdown / disconnect.
 
 export async function DELETE(request: NextRequest) {
-  const apiKey = (request.headers.get('x-api-key') ?? '').trim();
+  const apiKey = getPluginApiKey(request);
   if (!apiKey) {
-    return NextResponse.json({ error: 'Missing x-api-key header' }, { status: 401 });
+    return NextResponse.json({ error: 'Missing API key' }, { status: 401 });
   }
 
-  const userId = await getUserByApiKey(apiKey);
+  const userId = await getUserIdByPluginApiKey(apiKey);
   if (!userId) {
     return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
   }

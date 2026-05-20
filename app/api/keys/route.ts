@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     keys: (keys ?? []).map(k => ({
       id: k.id,
       name: k.name,
-      key_preview: k.key ? `${k.key.slice(0, 12)}${'•'.repeat(20)}` : '••••••••••••••••••••••••••••••••',
+      key_preview: k.key ? `${k.key.slice(0, 12)}${'•'.repeat(20)}` : '•'.repeat(32),
       created_at: k.created_at,
     })),
   });

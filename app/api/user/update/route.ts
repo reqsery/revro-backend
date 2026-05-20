@@ -10,7 +10,8 @@ export async function PUT(request: NextRequest) {
   if (user instanceof NextResponse) return user;
 
   try {
-    const { displayName } = await request.json();
+    const body = await request.json();
+    const displayName = body.displayName ?? body.display_name;
 
     if (!displayName || typeof displayName !== 'string') {
       return NextResponse.json({ error: 'displayName is required' }, { status: 400 });

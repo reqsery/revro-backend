@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getPluginApiKey, getUserIdByPluginApiKey } from '@/lib/plugin-auth';
 
 export const dynamic = 'force-dynamic';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function getUserByApiKey(apiKey: string) {
-  const { data, error } = await supabaseAdmin
-    .from('api_keys')
-    .select('user_id')
-    .eq('key', apiKey)
-    .single();
-  if (error || !data) return null;
-  return data.user_id as string;
-}
 
 // ── GET /api/plugin/poll ──────────────────────────────────────────────────────
 // Polled by the Roblox Studio plugin every ~2 seconds.
@@ -21,12 +12,12 @@ async function getUserByApiKey(apiKey: string) {
 // Also refreshes the connection's last_seen_at timestamp.
 
 export async function GET(request: NextRequest) {
-  const apiKey = request.headers.get('x-api-key') ?? '';
+  const apiKey = getPluginApiKey(request);
   if (!apiKey) {
-    return NextResponse.json({ error: 'Missing x-api-key header' }, { status: 401 });
+    return NextResponse.json({ error: 'Missing API key' }, { status: 401 });
   }
 
-  const userId = await getUserByApiKey(apiKey);
+  const userId = await getUserIdByPluginApiKey(apiKey);
   if (!userId) {
     return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
   }

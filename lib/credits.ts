@@ -24,11 +24,9 @@ export const CREDIT_COSTS = {
 
 // Tokens per 1 credit, by model
 export const TOKEN_RATES: Record<string, number> = {
-  'claude-haiku-4-5':  2000,
-  'claude-sonnet-4-5': 1000,
-  'claude-sonnet-4-6':  800,
-  'claude-opus-4-5':    600,
-  'claude-opus-4-6':    500,
+  'codex-mini':     2000,
+  'codex-standard': 1000,
+  'codex-premium':   600,
 };
 
 /**
@@ -41,30 +39,30 @@ export function tokensToCreditCost(planModel: string, totalTokens: number): numb
   return Math.round((totalTokens / rate) * 10000) / 10000; // 4dp precision
 }
 
-// Plan configuration with Claude models
+// Plan configuration with OpenAI Codex models
 export const PLAN_CONFIG = {
   free: {
     credits: 25,
     images_max: 0,
-    model: 'claude-sonnet-4-5',
+    model: 'codex-standard',
     display_name: 'Standard AI'
   },
   starter: {
     credits: 150,
     images_max: 0,
-    model: 'claude-sonnet-4-6',
+    model: 'codex-standard',
     display_name: 'Advanced AI'
   },
   pro: {
     credits: 500,
     images_max: 50,
-    model: 'claude-opus-4-6',
+    model: 'codex-premium',
     display_name: 'Premium AI'
   },
   studio: {
     credits: 1500,
     images_max: 150,
-    model: 'claude-opus-4-6',
+    model: 'codex-premium',
     display_name: 'Premium AI'
   }
 };
@@ -77,10 +75,10 @@ const LOW_CREDIT_THRESHOLDS: Partial<Record<keyof typeof PLAN_CONFIG, number>> =
   studio:  150,
 };
 
-// Get Claude model for user's plan
+// Get AI model for user's plan
 export function getModelForPlan(plan: string): string {
   const config = PLAN_CONFIG[plan as keyof typeof PLAN_CONFIG];
-  return config?.model || 'claude-sonnet-4-5';
+  return config?.model || 'codex-standard';
 }
 
 // Check if user has enough credits

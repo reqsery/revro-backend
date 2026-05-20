@@ -16,7 +16,7 @@ function generateApiKey(): string {
     apiKey += chars[randomBytes[i] % chars.length];
   }
   
-  return apiKey;
+  return `revro_${apiKey}`;
 }
 
 export async function POST(request: NextRequest) {

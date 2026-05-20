@@ -1,8 +1,33 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY!,
-});
+type RevroContext = 'roblox' | 'discord' | 'bot';
+type ConversationMessage = {
+  role?: string;
+  content?: unknown;
+};
+
+type AICompatibleUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens?: number;
+};
+
+type AICompatibleStreamEvent =
+  | {
+      type: 'message_start';
+      message: { usage: AICompatibleUsage };
+    }
+  | {
+      type: 'content_block_delta';
+      delta: { type: 'text_delta'; text: string };
+    }
+  | {
+      type: 'message_delta';
+      usage: AICompatibleUsage;
+    };
+
+const MAX_OUTPUT_TOKENS = 4096;
+let openaiClient: OpenAI | null = null;
 
 // System prompts (you can load these from files later)
 const ROBLOX_SYSTEM_PROMPT = `You are an expert Roblox Lua developer and Revro AI assistant. Your job is to help users create Roblox scripts, UI elements, and game systems.
@@ -87,74 +112,155 @@ Rules for the JSON:
 
 For follow-up questions or general Discord advice (not building), respond normally without JSON.`;
 
-
-/** Streaming version — returns an Anthropic MessageStream you can iterate over. */
-export function streamClaude(
-  model: string,
-  userMessage: string,
-  context: 'roblox' | 'discord' | 'bot' = 'roblox',
-  conversationHistory: any[] = []
-) {
-  const systemPrompt = context === 'roblox' ? ROBLOX_SYSTEM_PROMPT
-    : context === 'bot' ? BOT_SYSTEM_PROMPT
-    : DISCORD_SYSTEM_PROMPT;
-  const messages = [
-    ...conversationHistory,
-    { role: 'user' as const, content: userMessage },
-  ];
-  return anthropic.messages.stream({
-    model,
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages,
-  });
+function getSystemPrompt(context: RevroContext): string {
+  if (context === 'bot') return BOT_SYSTEM_PROMPT;
+  if (context === 'discord') return DISCORD_SYSTEM_PROMPT;
+  return ROBLOX_SYSTEM_PROMPT;
 }
 
-export async function callClaude(
+function getOpenAIClient(): OpenAI {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('AI service is not configured (OPENAI_API_KEY missing)');
+  }
+
+  openaiClient ??= new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
+  return openaiClient;
+}
+
+function normalizeContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && 'text' in part) {
+          const text = (part as { text?: unknown }).text;
+          return typeof text === 'string' ? text : '';
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+
+function normalizeRole(role: string | undefined): 'user' | 'assistant' {
+  return role === 'assistant' ? 'assistant' : 'user';
+}
+
+function buildInput(userMessage: string, conversationHistory: ConversationMessage[] = []) {
+  const history = conversationHistory
+    .map((message) => ({
+      role: normalizeRole(message.role),
+      content: normalizeContent(message.content),
+    }))
+    .filter((message) => message.content.trim().length > 0);
+
+  return [
+    ...history,
+    { role: 'user' as const, content: userMessage },
+  ];
+}
+
+function normalizeUsage(usage: any): AICompatibleUsage {
+  return {
+    input_tokens: usage?.input_tokens ?? 0,
+    output_tokens: usage?.output_tokens ?? 0,
+    total_tokens: usage?.total_tokens,
+  };
+}
+
+function getOutputText(response: any): string {
+  if (typeof response.output_text === 'string') return response.output_text;
+
+  return (response.output ?? [])
+    .flatMap((item: any) => item?.content ?? [])
+    .map((content: any) => content?.text ?? '')
+    .filter(Boolean)
+    .join('');
+}
+
+export async function* streamAI(
   model: string,
   userMessage: string,
-  context: 'roblox' | 'discord' | 'bot' = 'roblox',
-  conversationHistory: any[] = []
-) {
-  const systemPrompt = context === 'roblox' ? ROBLOX_SYSTEM_PROMPT
-    : context === 'bot' ? BOT_SYSTEM_PROMPT
-    : DISCORD_SYSTEM_PROMPT;
-
-  // Build message history
-  const messages = [
-    ...conversationHistory,
-    { role: 'user', content: userMessage }
-  ];
-
+  context: RevroContext = 'roblox',
+  conversationHistory: ConversationMessage[] = []
+): AsyncGenerator<AICompatibleStreamEvent> {
   try {
-    const response = await anthropic.messages.create({
+    const stream = await getOpenAIClient().responses.create({
       model,
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages,
+      instructions: getSystemPrompt(context),
+      input: buildInput(userMessage, conversationHistory),
+      max_output_tokens: MAX_OUTPUT_TOKENS,
+      stream: true,
+      stream_options: { include_obfuscation: false },
     });
 
-    return {
-      content: response.content[0].type === 'text' 
-        ? response.content[0].text 
-        : '',
-      usage: response.usage
-    };
+    for await (const event of stream) {
+      if (event.type === 'response.created') {
+        yield {
+          type: 'message_start',
+          message: { usage: normalizeUsage(event.response.usage) },
+        };
+      } else if (event.type === 'response.output_text.delta') {
+        yield {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: event.delta },
+        };
+      } else if (event.type === 'response.completed') {
+        yield {
+          type: 'message_delta',
+          usage: normalizeUsage(event.response.usage),
+        };
+      } else if (event.type === 'response.failed') {
+        throw new Error(event.response.error?.message ?? 'OpenAI response failed');
+      } else if (event.type === 'error') {
+        throw new Error(event.message);
+      }
+    }
   } catch (error: any) {
-    console.error('Claude API error:', error);
+    console.error('OpenAI stream error:', error);
     throw new Error(`AI service error: ${error.message}`);
   }
 }
 
-// Model mapping — keys match PLAN_CONFIG model names, values are Anthropic API model IDs
+export async function callAI(
+  model: string,
+  userMessage: string,
+  context: RevroContext = 'roblox',
+  conversationHistory: ConversationMessage[] = []
+) {
+  try {
+    const response = await getOpenAIClient().responses.create({
+      model,
+      instructions: getSystemPrompt(context),
+      input: buildInput(userMessage, conversationHistory),
+      max_output_tokens: MAX_OUTPUT_TOKENS,
+    });
+
+    return {
+      content: getOutputText(response),
+      usage: normalizeUsage(response.usage),
+    };
+  } catch (error: any) {
+    console.error('OpenAI API error:', error);
+    throw new Error(`AI service error: ${error.message}`);
+  }
+}
+
 export const MODEL_IDS: Record<string, string> = {
-  'claude-haiku-4-5':   'claude-haiku-4-5',
-  'claude-sonnet-4-5':  'claude-sonnet-4-5',
-  'claude-sonnet-4-6':  'claude-sonnet-4-6',
-  'claude-opus-4-5':    'claude-opus-4-5',
-  'claude-opus-4-6':    'claude-opus-4-6',
+  'codex-mini': 'codex-mini-latest',
+  'codex-standard': 'gpt-5.1-codex',
+  'codex-premium': 'gpt-5.1-codex',
 };
 
 export function getActualModelId(planModel: string): string {
-  return MODEL_IDS[planModel as keyof typeof MODEL_IDS] || MODEL_IDS['claude-sonnet-4-5'];
+  return MODEL_IDS[planModel as keyof typeof MODEL_IDS] || MODEL_IDS['codex-standard'];
 }
+
+export const callClaude = callAI;
+export const streamClaude = streamAI;
