@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits, tokensToCreditCost, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
+import {
+  canGenerateImages,
+  deductCredits,
+  getModelForPlan,
+  incrementImageCount,
+  tokensToCreditCost,
+  CREDIT_COSTS,
+} from '@/lib/credits';
 // CREDIT_COSTS is only used for IMAGE; everything else is token-based
 import { callAI, streamAI, getActualModelId } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
@@ -17,38 +24,109 @@ function getConversationId(value: unknown): string | undefined {
     : undefined;
 }
 
+type ImagePrompt = {
+  label: string;
+  prompt: string;
+};
+
+function parseImagePrompts(raw: string, userPrompt: string): ImagePrompt[] {
+  const jsonText = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? raw;
+
+  try {
+    const parsed = JSON.parse(jsonText);
+    const prompts = Array.isArray(parsed?.prompts) ? parsed.prompts : [];
+    const normalized = prompts
+      .map((item: any, index: number) => ({
+        label: typeof item?.label === 'string' && item.label.trim()
+          ? item.label.trim().slice(0, 40)
+          : `Asset ${index + 1}`,
+        prompt: typeof item?.prompt === 'string' ? item.prompt.trim() : '',
+      }))
+      .filter((item: ImagePrompt) => item.prompt.length > 0)
+      .slice(0, 3);
+
+    if (normalized.length > 0) return normalized;
+  } catch {}
+
+  return [{
+    label: 'Roblox asset',
+    prompt: raw.trim() || userPrompt,
+  }];
+}
+
+function normalizeImagePrompts(value: unknown, fallbackPrompt: string): ImagePrompt[] {
+  if (!Array.isArray(value)) {
+    return [{ label: 'Roblox asset', prompt: fallbackPrompt.trim() }].filter(item => item.prompt);
+  }
+
+  return value
+    .map((item: any, index: number) => ({
+      label: typeof item?.label === 'string' && item.label.trim()
+        ? item.label.trim().slice(0, 40)
+        : `Asset ${index + 1}`,
+      prompt: typeof item?.prompt === 'string' ? item.prompt.trim() : '',
+    }))
+    .filter((item: ImagePrompt) => item.prompt.length > 0)
+    .slice(0, 3);
+}
+
 async function refineImagePrompt(
   model: string,
   planModel: string,
   userPrompt: string
-): Promise<{ content: string; cost: number }> {
+): Promise<{ prompts: ImagePrompt[]; cost: number }> {
   const result = await callAI(
     model,
-    `Write a concise, vivid image prompt for this Roblox game asset request: ${userPrompt}. Output only the image prompt, no explanation.`,
+    `Plan Roblox image assets for this request: ${userPrompt}
+
+Return JSON only in this exact shape:
+{"prompts":[{"label":"Icon","prompt":"..."},{"label":"Menu","prompt":"..."}]}
+
+Rules:
+- Produce 1 prompt for one deliverable, 2 prompts when the user asks for separate assets such as "icon and menu", and never more than 3 prompts.
+- Target polished Roblox simulator game assets that look usable in-game, not generic sci-fi concept art or a standalone app dashboard.
+- For an icon, ask for a clean readable Roblox game icon on transparent or plain removable background with bold shapes and strong silhouette.
+- For a menu/panel, ask for a Roblox in-game UI mockup/panel with readable hierarchy, button states, progress/currency rows, and simulator-style proportions.
+- Do not put the requested icon inside a menu render unless the user explicitly asks for one combined image.
+- Keep each prompt concrete and faithful to the user's subject, colors, and style clues.`,
     'roblox',
     []
   );
   const totalTokens = (result.usage?.input_tokens ?? 0) + (result.usage?.output_tokens ?? 0);
   return {
-    content: result.content.trim(),
+    prompts: parseImagePrompts(result.content, userPrompt),
     cost: totalTokens > 0 ? tokensToCreditCost(planModel, totalTokens) : 0.1,
   };
 }
 
-async function generateImage(prompt: string): Promise<string> {
+function getImageOptions(asset: ImagePrompt) {
+  const label = asset.label.toLowerCase();
+  const prompt = asset.prompt.toLowerCase();
+  const isIcon = label.includes('icon') || prompt.includes('icon');
+  const isMenu = label.includes('menu') || label.includes('panel') || prompt.includes('menu');
+
+  return {
+    background: isIcon ? 'transparent' : 'auto',
+    size: isMenu ? '1536x1024' : '1024x1024',
+  };
+}
+
+async function generateImage(asset: ImagePrompt): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('Image generation is not configured (OPENAI_API_KEY missing)');
+  const options = getImageOptions(asset);
 
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: 'gpt-image-1.5',
-      prompt,
+      prompt: asset.prompt,
       n: 1,
-      size: '1024x1024',
+      size: options.size,
+      background: options.background,
       output_format: 'png',
-      quality: 'medium',
+      quality: 'high',
     }),
   });
 
@@ -126,7 +204,9 @@ export async function POST(request: NextRequest) {
     const step: string    = body.step   ?? 'generate';
     const conversationId = getConversationId(body.conversation_id ?? body.conversationId);
 
-    if (!prompt) {
+    const imagePrompts = normalizeImagePrompts(body.prompts, prompt);
+
+    if (!prompt && !(type === 'image' && step === 'generate' && imagePrompts.length > 0)) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
@@ -157,21 +237,26 @@ export async function POST(request: NextRequest) {
 
     // ── Image: refine ─────────────────────────────────────────────────────────
     if (type === 'image' && step === 'refine') {
-      const { content: refinedPrompt, cost } = await refineImagePrompt(actualModel, planModel, prompt);
+      const { prompts: refinedPrompts, cost } = await refineImagePrompt(actualModel, planModel, prompt);
       const creditResult = await deductCredits(user.id, cost, 'image_refine', { model: planModel });
+      const promptSummary = refinedPrompts.map(item => `${item.label}: ${item.prompt}`).join('\n\n');
       const { convId, messageId } = await saveMessages(
         user.id,
         conversationId,
         prompt,
-        refinedPrompt,
+        promptSummary,
         planModel,
         cost,
       );
 
       return NextResponse.json({
         response: {
-          refined_prompt: refinedPrompt,
-          explanation: 'Prompt refined. Click Generate to create the image.',
+          refined_prompt: refinedPrompts[0]?.prompt,
+          refined_prompts: refinedPrompts,
+          image_count: refinedPrompts.length,
+          explanation: refinedPrompts.length > 1
+            ? `Prepared ${refinedPrompts.length} Roblox assets. Review them, then generate.`
+            : 'Prepared a Roblox asset prompt. Review it, then generate.',
           credits_used: cost,
           credits_remaining: creditResult.creditsRemaining,
         },
@@ -182,22 +267,33 @@ export async function POST(request: NextRequest) {
 
     // ── Image: generate ───────────────────────────────────────────────────────
     if (type === 'image' && step === 'generate') {
-      const cost = CREDIT_COSTS.IMAGE;
-      const imageUrl = await generateImage(prompt);
+      const prompts = imagePrompts.length > 0
+        ? imagePrompts
+        : [{ label: 'Roblox asset', prompt }];
+      const imageAllowance = await canGenerateImages(user.id, prompts.length);
+      if (!imageAllowance.allowed) {
+        return NextResponse.json({ error: imageAllowance.reason }, { status: 402 });
+      }
+
+      const cost = CREDIT_COSTS.IMAGE * prompts.length;
+      const imageUrls = await Promise.all(prompts.map(item => generateImage(item)));
       const creditResult = await deductCredits(user.id, cost, 'image_generation', { model: 'gpt-image-1.5' });
+      await incrementImageCount(user.id, prompts.length);
       const { convId, messageId } = await saveMessages(
         user.id,
         conversationId,
-        prompt,
-        'Image generated successfully.',
+        prompt || prompts.map(item => item.prompt).join('\n\n'),
+        `Generated ${prompts.length} Roblox image asset${prompts.length === 1 ? '' : 's'}.`,
         planModel,
         cost,
       );
 
       return NextResponse.json({
         response: {
-          image_url: imageUrl,
-          explanation: 'Image generated successfully.',
+          image_url: imageUrls[0],
+          image_urls: imageUrls,
+          image_count: imageUrls.length,
+          explanation: `Generated ${imageUrls.length} Roblox image asset${imageUrls.length === 1 ? '' : 's'}.`,
           credits_used: cost,
           credits_remaining: creditResult.creditsRemaining,
         },
