@@ -70,11 +70,16 @@ async function saveMessages(
   let convId: string | null = conversationId ?? null;
 
   if (!convId) {
-    const { data: conv } = await supabaseAdmin
+    const { data: conv, error: convErr } = await supabaseAdmin
       .from('conversations')
       .insert({ user_id: userId, title: prompt.substring(0, 50), type: 'roblox' })
       .select('id')
       .single();
+
+    if (convErr) {
+      console.error('[Roblox chat] Failed to create conversation:', convErr.message);
+      throw convErr;
+    }
     convId = conv?.id ?? null;
 
     // Async title upgrade — don't await so we don't block the response
@@ -133,6 +138,18 @@ export async function POST(request: NextRequest) {
 
     let history: any[] = [];
     if (conversationId) {
+      const { data: conversation, error: conversationErr } = await supabaseAdmin
+        .from('conversations')
+        .select('id, type')
+        .eq('id', conversationId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (conversationErr) throw conversationErr;
+      if (!conversation || conversation.type !== 'roblox') {
+        return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+      }
+
       const { data: msgs } = await supabaseAdmin
         .from('messages')
         .select('role, content')

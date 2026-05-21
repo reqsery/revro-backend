@@ -43,6 +43,18 @@ export async function POST(request: NextRequest) {
     // Fetch conversation history
     let history: any[] = []
     if (conversationId) {
+      const { data: conversation, error: conversationErr } = await supabaseAdmin
+        .from('conversations')
+        .select('id, type')
+        .eq('id', conversationId)
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (conversationErr) throw conversationErr
+      if (!conversation || conversation.type !== 'discord') {
+        return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+      }
+
       const { data: msgs } = await supabaseAdmin
         .from('messages')
         .select('role, content')
@@ -74,11 +86,15 @@ export async function POST(request: NextRequest) {
     // Save / create conversation
     let convId = conversationId
     if (!convId) {
-      const { data: conv } = await supabaseAdmin
+      const { data: conv, error: convErr } = await supabaseAdmin
         .from('conversations')
         .insert({ user_id: user.id, title: prompt.substring(0, 50), type: 'discord' })
         .select('id')
         .single()
+      if (convErr) {
+        console.error('[Discord chat] Failed to create conversation:', convErr.message)
+        throw convErr
+      }
       convId = conv?.id
     }
 

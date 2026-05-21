@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
       conversations: conversations || []
     });
 
-  } catch (error) {
-    console.error('Get conversations error:', error);
+  } catch (error: any) {
+    console.error('[Conversations list] Failed:', error?.message ?? 'Unknown error');
     return NextResponse.json(
       { error: 'Failed to fetch conversations' },
       { status: 500 }

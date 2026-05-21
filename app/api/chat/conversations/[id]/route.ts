@@ -82,6 +82,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
+    console.error('[Conversations delete] Failed:', err?.message ?? 'Unknown error');
     return NextResponse.json({ error: 'Failed to delete conversation' }, { status: 500 });
   }
 }
