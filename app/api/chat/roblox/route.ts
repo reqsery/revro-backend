@@ -84,11 +84,13 @@ Return JSON only in this exact shape:
 
 Rules:
 - Produce 1 prompt for one deliverable, 2 prompts when the user asks for separate assets such as "icon and menu", and never more than 3 prompts.
-- Target polished Roblox simulator game assets that look usable in-game, not generic sci-fi concept art or a standalone app dashboard.
-- For an icon, ask for a clean readable Roblox game icon on transparent or plain removable background with bold shapes and strong silhouette.
-- For a menu/panel, ask for a Roblox in-game UI mockup/panel with readable hierarchy, button states, progress/currency rows, and simulator-style proportions.
+- Default to ordinary Roblox game art: simple, readable, playful 2D GUI assets and icons for Roblox experiences.
+- Avoid cinematic renders, sci-fi dashboards, holograms, metal frames, photoreal lighting, game screenshots, and over-detailed concept art unless the user explicitly asks for them.
+- For an icon, request a compact Roblox simulator-style icon with bold silhouette, chunky shapes, clean outline, simple shading, transparent background, and readability at small sizes.
+- For a menu/panel, request a general Roblox in-game GUI panel with a clear header, bright buttons, rounded sections, simple strokes, and practical layout. A shop may use a themed custom panel background matching the shop subject.
+- Keep menus as UI assets, not placed inside a 3D Roblox world screenshot.
 - Do not put the requested icon inside a menu render unless the user explicitly asks for one combined image.
-- Keep each prompt concrete and faithful to the user's subject, colors, and style clues.`,
+- Keep each prompt short, concrete, and faithful to the user's subject, colors, and style clues.`,
     'roblox',
     []
   );
@@ -126,7 +128,7 @@ async function generateImage(asset: ImagePrompt): Promise<string> {
       size: options.size,
       background: options.background,
       output_format: 'png',
-      quality: 'high',
+      quality: 'medium',
     }),
   });
 

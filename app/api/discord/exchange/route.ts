@@ -76,7 +76,11 @@ export async function POST(request: NextRequest) {
     try { return (BigInt(g.permissions) & ADMIN_BIT) === ADMIN_BIT; } catch { return false; }
   });
 
-  const guildIds = adminGuilds.map(g => g.id);
+  const guildsForProfile = adminGuilds.map(g => ({
+    id: g.id,
+    name: g.name,
+    icon: g.icon,
+  }));
 
   // ── 3. Fetch Discord user info to store their Discord user ID ──────────────
   let discordUserId: string | null = null;
@@ -94,7 +98,7 @@ export async function POST(request: NextRequest) {
   const { error: discordUpdateErr } = await supabaseAdmin
     .from('users')
     .update({
-      discord_guild_ids:  JSON.stringify(guildIds),
+      discord_guild_ids:  JSON.stringify(guildsForProfile),
       discord_user_id:    discordUserId,
       updated_at:         new Date().toISOString(),
     })
@@ -110,6 +114,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok:          true,
     guildsFound: adminGuilds.length,
-    guildIds,
+    guildIds: guildsForProfile.map(g => g.id),
   });
 }

@@ -13,6 +13,12 @@ interface BotGuild {
   memberCount: number | null;
 }
 
+type StoredGuild = {
+  id: string;
+  name?: string;
+  icon?: string | null;
+};
+
 async function fetchBotGuilds(token: string): Promise<BotGuild[]> {
   const res = await fetch(`${DISCORD_API}/users/@me/guilds`, {
     headers: { Authorization: `Bot ${token}` },
@@ -39,7 +45,7 @@ export async function GET(request: NextRequest) {
   if (user instanceof NextResponse) return user;
 
   // Read user's stored Discord data
-  let storedGuildIds: string[] | null = null;
+  let storedGuilds: StoredGuild[] | null = null;
   let savedGuildId:   string | null = null;
   let userBotToken:   string | null = null;
 
@@ -50,13 +56,24 @@ export async function GET(request: NextRequest) {
       .eq('id', user.id)
       .single();
 
-    storedGuildIds = data?.discord_guild_ids ? JSON.parse(data.discord_guild_ids) : null;
+    const parsedGuilds: unknown = data?.discord_guild_ids ? JSON.parse(data.discord_guild_ids) : null;
+    storedGuilds = Array.isArray(parsedGuilds)
+      ? parsedGuilds
+        .map((guild: any) => typeof guild === 'string'
+          ? { id: guild }
+          : {
+              id: typeof guild?.id === 'string' ? guild.id : '',
+              name: typeof guild?.name === 'string' ? guild.name : undefined,
+              icon: typeof guild?.icon === 'string' ? guild.icon : null,
+            })
+        .filter((guild: StoredGuild) => guild.id)
+      : null;
     savedGuildId   = data?.discord_guild_id ?? null;
     userBotToken   = data?.discord_bot_token ?? null;
   } catch {}
 
   // User hasn't connected their Discord account yet
-  if (!storedGuildIds || storedGuildIds.length === 0) {
+  if (!storedGuilds || storedGuilds.length === 0) {
     return NextResponse.json({ guilds: [], connected: false, savedGuildId: null });
   }
 
@@ -77,14 +94,15 @@ export async function GET(request: NextRequest) {
   }
 
   // Build the guild list — enrich with bot data where available
-  const guilds = storedGuildIds.map(id => {
-    const botGuild = botGuildMap.get(id);
+  const guilds = storedGuilds.map(storedGuild => {
+    const botGuild = botGuildMap.get(storedGuild.id);
     return {
-      id,
-      name:        botGuild?.name ?? `Server ${id}`,
-      icon:        botGuild?.icon ?? null,
+      id:          storedGuild.id,
+      name:        botGuild?.name ?? storedGuild.name ?? `Server ${storedGuild.id}`,
+      icon:        botGuild?.icon
+        ?? (storedGuild.icon ? `https://cdn.discordapp.com/icons/${storedGuild.id}/${storedGuild.icon}.png` : null),
       memberCount: botGuild?.memberCount ?? null,
-      botPresent:  botGuildMap.has(id),
+      botPresent:  botGuildMap.has(storedGuild.id),
     };
   });
 

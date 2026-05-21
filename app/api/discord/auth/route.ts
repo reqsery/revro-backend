@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     response_type: 'code',
     redirect_uri:  REDIRECT_URI,
     scope:         'identify guilds',
+    prompt:        'consent',
     state:         user.id, // passed back in callback so we know which Revro user this is
   });
 
