@@ -171,12 +171,18 @@ async function saveMessages(
 
   let messageId: string | null = null;
   if (convId) {
-    await supabaseAdmin.from('messages').insert({
+    const { error: userMessageErr } = await supabaseAdmin.from('messages').insert({
       conversation_id: convId,
       role: 'user',
       content: prompt,
     });
-    const { data: assistantMsg } = await supabaseAdmin
+
+    if (userMessageErr) {
+      console.error('[Roblox chat] Failed to save user message:', userMessageErr.message);
+      throw userMessageErr;
+    }
+
+    const { data: assistantMsg, error: assistantMessageErr } = await supabaseAdmin
       .from('messages')
       .insert({
         conversation_id: convId,
@@ -187,6 +193,23 @@ async function saveMessages(
       })
       .select('id')
       .single();
+
+    if (assistantMessageErr) {
+      console.error('[Roblox chat] Failed to save assistant message:', assistantMessageErr.message);
+      throw assistantMessageErr;
+    }
+
+    const { error: touchErr } = await supabaseAdmin
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', convId)
+      .eq('user_id', userId);
+
+    if (touchErr) {
+      console.error('[Roblox chat] Failed to update conversation timestamp:', touchErr.message);
+      throw touchErr;
+    }
+
     messageId = assistantMsg?.id ?? null;
   }
 

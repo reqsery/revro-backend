@@ -107,12 +107,17 @@ export async function POST(request: NextRequest) {
 
     let messageId: string | null = null
     if (convId) {
-      await supabaseAdmin.from('messages').insert({
+      const { error: userMessageErr } = await supabaseAdmin.from('messages').insert({
         conversation_id: convId,
         role: 'user',
         content: prompt,
       })
-      const { data: assistantMsg } = await supabaseAdmin
+      if (userMessageErr) {
+        console.error('[Discord chat] Failed to save user message:', userMessageErr.message)
+        throw userMessageErr
+      }
+
+      const { data: assistantMsg, error: assistantMessageErr } = await supabaseAdmin
         .from('messages')
         .insert({
           conversation_id: convId,
@@ -123,6 +128,21 @@ export async function POST(request: NextRequest) {
         })
         .select('id')
         .single()
+      if (assistantMessageErr) {
+        console.error('[Discord chat] Failed to save assistant message:', assistantMessageErr.message)
+        throw assistantMessageErr
+      }
+
+      const { error: touchErr } = await supabaseAdmin
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', convId)
+        .eq('user_id', user.id)
+      if (touchErr) {
+        console.error('[Discord chat] Failed to update conversation timestamp:', touchErr.message)
+        throw touchErr
+      }
+
       messageId = assistantMsg?.id ?? null
     }
 
