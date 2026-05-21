@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (conversationErr) throw conversationErr;
-      if (!conversation || conversation.type !== 'roblox') {
+      if (!conversation) {
         return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
       }
 
