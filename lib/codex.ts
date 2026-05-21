@@ -86,7 +86,7 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
       "emoji": "📢",
       "channels": [
         { "name": "rules", "type": "text", "emoji": "📌", "topic": "Server rules and guidelines" },
-        { "name": "announcements", "type": "text", "emoji": "📣", "topic": "Important announcements" }
+        { "name": "announcements", "type": "announcement", "emoji": "📣", "topic": "Important announcements" }
       ]
     },
     {
@@ -94,6 +94,7 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
       "emoji": "💬",
       "channels": [
         { "name": "general", "type": "text", "emoji": "💬", "topic": "General chat" },
+        { "name": "community-help", "type": "forum", "emoji": "🧵", "topic": "Questions and help threads" },
         { "name": "voice-chat", "type": "voice", "emoji": "🔊" }
       ]
     }
@@ -109,7 +110,9 @@ Rules for the JSON:
 - Each role MUST have an appropriate emoji field that visually represents the role
 - Each channel MUST have an appropriate emoji field that visually represents the channel's purpose
 - Each category MUST have an appropriate emoji field that visually represents the category's theme
-- Channel type is "text" or "voice"
+- Channel type is "text", "voice", "announcement", or "forum"
+- Use "announcement" when the user asks for announcements, updates, news, patch notes, or broadcast channels
+- Use "forum" when the user asks for forums, help threads, suggestions, bug reports, showcase posts, or discussion topics that should be separate posts
 - Category and channel names should be lowercase with hyphens (Discord style)
 - Include 3-8 roles and 3-6 categories with 2-5 channels each
 - Always include a general text channel and at least one voice channel

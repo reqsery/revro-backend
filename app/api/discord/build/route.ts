@@ -19,7 +19,7 @@ interface DiscordRole {
 
 interface DiscordChannel {
   name: string;
-  type: 'text' | 'voice';
+  type: 'text' | 'voice' | 'announcement' | 'forum';
   topic?: string;
 }
 
@@ -58,6 +58,11 @@ interface ExistingChannel {
   id: string;
   name: string;
   type: number;
+}
+
+interface DiscordGuildState {
+  rules_channel_id?: string | null;
+  public_updates_channel_id?: string | null;
 }
 
 interface BuildPreview {
@@ -160,6 +165,13 @@ function recordBuildError(result: BuildResult, step: string, err: unknown) {
   console.error('[Discord build] Step failed', { step, message });
 }
 
+function getChannelType(channel: DiscordChannel): number {
+  if (channel.type === 'voice') return 2; // GUILD_VOICE
+  if (channel.type === 'announcement') return 5; // GUILD_ANNOUNCEMENT
+  if (channel.type === 'forum') return 15; // GUILD_FORUM
+  return 0; // GUILD_TEXT
+}
+
 async function scanExistingChannels(guildId: string): Promise<BuildPreview> {
   const channels: ExistingChannel[] = await discordRequest('GET', `/guilds/${guildId}/channels`);
   return channels.reduce<BuildPreview>((preview, channel) => {
@@ -235,8 +247,16 @@ export async function POST(request: NextRequest) {
   // preview + confirmation from the frontend. Delete children before categories.
   if (replaceChannels) {
     try {
+      const guild: DiscordGuildState = await discordRequest('GET', `/guilds/${guildId}`);
+      const protectedChannelIds = new Set(
+        [guild.rules_channel_id, guild.public_updates_channel_id].filter(Boolean)
+      );
       const preview = await scanExistingChannels(guildId);
       for (const channel of [...preview.channels, ...preview.categories]) {
+        if (protectedChannelIds.has(channel.id)) {
+          result.errors.push(`Protected Community channel kept: "${channel.name}"`);
+          continue;
+        }
         try {
           await discordRequest('DELETE', `/channels/${channel.id}`);
           result.channelsDeleted.push(channel.name);
@@ -297,15 +317,15 @@ export async function POST(request: NextRequest) {
     // Create channels inside the category
     for (const channel of (category.channels ?? [])) {
       try {
-        const channelType = channel.type === 'voice' ? 2 : 0; // 0=TEXT, 2=VOICE
+        const channelType = getChannelType(channel);
         await discordRequest('POST', `/guilds/${guildId}/channels`, {
           name: channel.name.toLowerCase().replace(/\s+/g, '-'),
           type: channelType,
           parent_id: categoryId,
           permission_overwrites: permissionOverwrites,
-          ...(channel.topic && channelType === 0 ? { topic: channel.topic } : {}),
+          ...(channel.topic && channelType !== 2 ? { topic: channel.topic } : {}),
         });
-        result.channelsCreated.push(`${category.name}/#${channel.name}`);
+        result.channelsCreated.push(`${category.name}/${channel.type === 'voice' ? '' : '#'}${channel.name}`);
         await sleep(125);
       } catch (err: any) {
         recordBuildError(result, `Channel "${channel.name}"`, err);
