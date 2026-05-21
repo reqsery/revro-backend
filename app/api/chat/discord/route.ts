@@ -21,9 +21,21 @@ function parseDiscordResponse(raw: string): { explanation: string; config?: any 
     try {
       const config = JSON.parse(match[1])
       const explanation = raw.replace(/```(?:json)?\n[\s\S]*?```/g, '').trim()
-      return { explanation, config }
+      return {
+        explanation: explanation || 'I planned the roles, categories, and channels for this server. Review the structure below before building it.',
+        config,
+      }
     } catch {}
   }
+  try {
+    const config = JSON.parse(raw)
+    if (config?.roles || config?.categories) {
+      return {
+        explanation: 'I planned the roles, categories, and channels for this server. Review the structure below before building it.',
+        config,
+      }
+    }
+  } catch {}
   return { explanation: raw }
 }
 

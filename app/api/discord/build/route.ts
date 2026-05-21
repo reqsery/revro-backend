@@ -36,7 +36,19 @@ interface BuildResult {
   rolesCreated: string[];
   categoriesCreated: string[];
   channelsCreated: string[];
+  channelsDeleted: string[];
   errors: string[];
+}
+
+interface ExistingChannel {
+  id: string;
+  name: string;
+  type: number;
+}
+
+interface BuildPreview {
+  channels: { id: string; name: string }[];
+  categories: { id: string; name: string }[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -68,11 +80,22 @@ async function discordRequest(
     throw new Error(message);
   }
 
+  if (res.status === 204) return null;
   return res.json();
 }
 
 // Small delay to respect Discord rate limits (5 requests per second per route)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+async function scanExistingChannels(guildId: string): Promise<BuildPreview> {
+  const channels: ExistingChannel[] = await discordRequest('GET', `/guilds/${guildId}/channels`);
+  return channels.reduce<BuildPreview>((preview, channel) => {
+    const item = { id: channel.id, name: channel.name };
+    if (channel.type === 4) preview.categories.push(item);
+    else preview.channels.push(item);
+    return preview;
+  }, { channels: [], categories: [] });
+}
 
 // ── Route ─────────────────────────────────────────────────────────────────────
 
@@ -83,6 +106,8 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const guildId: string = body.guild_id ?? '';
   const plan: BuildPlan = body.plan ?? {};
+  const previewOnly = body.preview === true;
+  const replaceChannels = body.replace_channels === true;
 
   if (!guildId) {
     return NextResponse.json({ error: 'guild_id is required' }, { status: 400 });
@@ -106,6 +131,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: err.message || 'Cannot connect to Discord' }, { status: 500 });
   }
 
+  if (previewOnly) {
+    try {
+      return NextResponse.json({ success: true, preview: await scanExistingChannels(guildId) });
+    } catch (err: any) {
+      return NextResponse.json({ error: err.message || 'Failed to scan server' }, { status: 500 });
+    }
+  }
+
   // Deduct 3 credits for building a server
   try {
     await deductCredits(user.id, 3, 'discord_build', { guild_id: guildId });
@@ -120,8 +153,28 @@ export async function POST(request: NextRequest) {
     rolesCreated: [],
     categoriesCreated: [],
     channelsCreated: [],
+    channelsDeleted: [],
     errors: [],
   };
+
+  // Replacing channels is destructive, so it only runs after an explicit
+  // preview + confirmation from the frontend. Delete children before categories.
+  if (replaceChannels) {
+    try {
+      const preview = await scanExistingChannels(guildId);
+      for (const channel of [...preview.channels, ...preview.categories]) {
+        try {
+          await discordRequest('DELETE', `/channels/${channel.id}`);
+          result.channelsDeleted.push(channel.name);
+          await sleep(300);
+        } catch (err: any) {
+          result.errors.push(`Delete channel "${channel.name}": ${err.message}`);
+        }
+      }
+    } catch (err: any) {
+      result.errors.push(`Scan existing channels: ${err.message}`);
+    }
+  }
 
   // ── 1. Create roles ────────────────────────────────────────────────────────
   for (const role of (plan.roles ?? [])) {
