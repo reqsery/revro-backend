@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan, CREDIT_COSTS } from '@/lib/credits';
-// CREDIT_COSTS is only used for IMAGE (DALL-E has no token data); everything else is token-based
+// CREDIT_COSTS is only used for IMAGE; everything else is token-based
 import { callAI, streamAI, getActualModelId } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -16,7 +16,7 @@ async function refineImagePrompt(
 ): Promise<{ content: string; cost: number }> {
   const result = await callAI(
     model,
-    `Write a concise, vivid DALL-E 3 image prompt for this Roblox game asset request: ${userPrompt}. Output only the image prompt, no explanation.`,
+    `Write a concise, vivid image prompt for this Roblox game asset request: ${userPrompt}. Output only the image prompt, no explanation.`,
     'roblox',
     []
   );
@@ -34,7 +34,14 @@ async function generateImage(prompt: string): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: 'dall-e-3', prompt, n: 1, size: '1024x1024' }),
+    body: JSON.stringify({
+      model: 'gpt-image-1.5',
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      output_format: 'png',
+      quality: 'medium',
+    }),
   });
 
   if (!res.ok) {
@@ -43,20 +50,10 @@ async function generateImage(prompt: string): Promise<string> {
   }
 
   const data: any = await res.json();
-  const url = data?.data?.[0]?.url;
-  if (!url) throw new Error('No image URL returned from OpenAI');
-  return url;
-}
-
-/** Generate a short conversation title (fire-and-forget). */
-async function generateTitle(prompt: string, response: string): Promise<string> {
-  const result = await callAI(
-    'codex-mini',
-    `Write a short title (3-6 words) for a Roblox scripting conversation. The user asked: "${prompt.slice(0, 300)}"\nOutput ONLY the title. No quotes. No period at the end.`,
-    'roblox',
-    [],
-  );
-  return result.content.trim().slice(0, 60) || prompt.slice(0, 50);
+  const image = data?.data?.[0];
+  if (image?.b64_json) return `data:image/png;base64,${image.b64_json}`;
+  if (image?.url) return image.url;
+  throw new Error('No image output returned from OpenAI');
 }
 
 async function saveMessages(
@@ -82,13 +79,6 @@ async function saveMessages(
     }
     convId = conv?.id ?? null;
 
-    // Async title upgrade — don't await so we don't block the response
-    if (convId) {
-      const savedConvId = convId;
-      void generateTitle(prompt, responseText)
-        .then(title => supabaseAdmin.from('conversations').update({ title }).eq('id', savedConvId))
-        .catch(() => {});
-    }
   }
 
   let messageId: string | null = null;
@@ -178,8 +168,8 @@ export async function POST(request: NextRequest) {
     // ── Image: generate ───────────────────────────────────────────────────────
     if (type === 'image' && step === 'generate') {
       const cost = CREDIT_COSTS.IMAGE;
-      const creditResult = await deductCredits(user.id, cost, 'image_generation', { model: 'dall-e-3' });
       const imageUrl = await generateImage(prompt);
+      const creditResult = await deductCredits(user.id, cost, 'image_generation', { model: 'gpt-image-1.5' });
 
       return NextResponse.json({
         response: {
