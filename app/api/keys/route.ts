@@ -47,12 +47,25 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => ({}));
   const name: string = (body.name ?? '').trim();
+  const revokeExisting = body.revoke_existing === true;
 
   if (!name) {
     return NextResponse.json({ error: 'name is required' }, { status: 400 });
   }
 
-  // Limit to 5 keys per user
+  if (revokeExisting) {
+    const { error: revokeError } = await supabaseAdmin
+      .from('api_keys')
+      .delete()
+      .eq('user_id', user.id);
+
+    if (revokeError) {
+      console.error('[Keys] Revoke before rotate failed:', revokeError.message);
+      return NextResponse.json({ error: 'Failed to revoke existing API keys' }, { status: 500 });
+    }
+  }
+
+  // Limit to 5 keys per user for non-rotation key creation.
   const { count } = await supabaseAdmin
     .from('api_keys')
     .select('id', { count: 'exact', head: true })
