@@ -77,7 +77,8 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
 {
   "roles": [
     { "name": "Admin", "emoji": "👑", "color": 15158332, "hoist": true, "mentionable": false, "permissions": "8" },
-    { "name": "Moderator", "emoji": "🛡️", "color": 3447003, "hoist": true, "mentionable": true, "permissions": "2" }
+    { "name": "Moderator", "emoji": "🛡️", "color": 3447003, "hoist": true, "mentionable": true, "permissions": "11270" },
+    { "name": "Member", "emoji": "🎮", "color": 3066993, "hoist": false, "mentionable": false, "permissions": "3072" }
   ],
   "categories": [
     {
@@ -102,7 +103,9 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
 
 Rules for the JSON:
 - Role colors are decimal integers (e.g. red=15158332, blue=3447003, green=3066993, purple=10181046, orange=15105570)
-- permissions: "8" = Administrator, "2" = Kick Members, "4" = Ban Members, "2048" = Send Messages, "1024" = View Channels, "8192" = Manage Messages, "0" = no special permissions
+- permissions is a Discord decimal bitfield. Combine every permission the role needs in one decimal string.
+- Common permission values: "8" = Administrator; "3072" = View Channels + Send Messages; "11264" = View Channels + Send Messages + Manage Messages; "11270" = View Channels + Send Messages + Manage Messages + Kick Members + Ban Members; "0" = no special permissions
+- Never give a moderator only "2" or "4". Moderation roles that work in channels need the combined channel bits too unless the user asks for a restricted role.
 - Each role MUST have an appropriate emoji field that visually represents the role
 - Each channel MUST have an appropriate emoji field that visually represents the channel's purpose
 - Each category MUST have an appropriate emoji field that visually represents the category's theme

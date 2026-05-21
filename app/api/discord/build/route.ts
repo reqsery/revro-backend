@@ -109,10 +109,29 @@ async function discordRequest(
 // Small delay to respect Discord rate limits (5 requests per second per route)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const CHANNEL_PERMISSION_MASK = BigInt(1024) | BigInt(2048) | BigInt(8192);
+const MODERATION_PERMISSION_MASK = BigInt(2) | BigInt(4) | BigInt(8192);
+const MEMBER_CHANNEL_PERMISSIONS = BigInt(1024) | BigInt(2048);
+const MODERATOR_CHANNEL_PERMISSIONS = MEMBER_CHANNEL_PERMISSIONS | BigInt(8192);
 
 function getChannelPermissionBits(value: string | undefined): string {
   try {
     return String(BigInt(value ?? '0') & CHANNEL_PERMISSION_MASK);
+  } catch {
+    return '0';
+  }
+}
+
+function normalizeRolePermissions(value: string | undefined): string {
+  try {
+    const permissions = BigInt(value ?? '0');
+    if ((permissions & BigInt(8)) === BigInt(8)) return String(permissions);
+    if ((permissions & MODERATION_PERMISSION_MASK) !== BigInt(0)) {
+      return String(permissions | MODERATOR_CHANNEL_PERMISSIONS);
+    }
+    if ((permissions & BigInt(2048)) === BigInt(2048)) {
+      return String(permissions | MEMBER_CHANNEL_PERMISSIONS);
+    }
+    return String(permissions);
   } catch {
     return '0';
   }
@@ -234,17 +253,18 @@ export async function POST(request: NextRequest) {
   // ── 1. Create roles ────────────────────────────────────────────────────────
   for (const role of (plan.roles ?? [])) {
     try {
+      const permissions = normalizeRolePermissions(role.permissions);
       const created = await discordRequest('POST', `/guilds/${guildId}/roles`, {
         name: role.name,
         color: role.color ?? 0,
         hoist: role.hoist ?? false,
         mentionable: role.mentionable ?? false,
-        permissions: role.permissions ?? '0',
+        permissions,
       });
       createdRoles.push({
         id: created.id,
         name: role.name,
-        permissions: role.permissions ?? '0',
+        permissions,
       });
       result.rolesCreated.push(role.name);
       await sleep(125); // rate limit safety
