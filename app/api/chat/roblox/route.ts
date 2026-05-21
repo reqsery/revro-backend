@@ -9,6 +9,14 @@ export const dynamic = 'force-dynamic';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function getConversationId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.startsWith('local_') || value.startsWith('pending_')) return undefined;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : undefined;
+}
+
 async function refineImagePrompt(
   model: string,
   planModel: string,
@@ -116,8 +124,7 @@ export async function POST(request: NextRequest) {
     const prompt: string  = body.prompt ?? body.message ?? '';
     const type: string    = body.type   ?? 'script';
     const step: string    = body.step   ?? 'generate';
-    const rawConvId: string | undefined = body.conversation_id ?? body.conversationId;
-    const conversationId  = rawConvId && !rawConvId.startsWith('local_') ? rawConvId : undefined;
+    const conversationId = getConversationId(body.conversation_id ?? body.conversationId);
 
     if (!prompt) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
@@ -152,6 +159,14 @@ export async function POST(request: NextRequest) {
     if (type === 'image' && step === 'refine') {
       const { content: refinedPrompt, cost } = await refineImagePrompt(actualModel, planModel, prompt);
       const creditResult = await deductCredits(user.id, cost, 'image_refine', { model: planModel });
+      const { convId, messageId } = await saveMessages(
+        user.id,
+        conversationId,
+        prompt,
+        refinedPrompt,
+        planModel,
+        cost,
+      );
 
       return NextResponse.json({
         response: {
@@ -160,8 +175,8 @@ export async function POST(request: NextRequest) {
           credits_used: cost,
           credits_remaining: creditResult.creditsRemaining,
         },
-        conversation_id: conversationId ?? null,
-        message_id: null,
+        conversation_id: convId,
+        message_id: messageId,
       });
     }
 
@@ -170,6 +185,14 @@ export async function POST(request: NextRequest) {
       const cost = CREDIT_COSTS.IMAGE;
       const imageUrl = await generateImage(prompt);
       const creditResult = await deductCredits(user.id, cost, 'image_generation', { model: 'gpt-image-1.5' });
+      const { convId, messageId } = await saveMessages(
+        user.id,
+        conversationId,
+        prompt,
+        'Image generated successfully.',
+        planModel,
+        cost,
+      );
 
       return NextResponse.json({
         response: {
@@ -178,8 +201,8 @@ export async function POST(request: NextRequest) {
           credits_used: cost,
           credits_remaining: creditResult.creditsRemaining,
         },
-        conversation_id: conversationId ?? null,
-        message_id: null,
+        conversation_id: convId,
+        message_id: messageId,
       });
     }
 

@@ -6,6 +6,14 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
+function getConversationId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  if (value.startsWith('local_') || value.startsWith('pending_')) return undefined
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : undefined
+}
+
 /** Try to pull a JSON block out of the AI response, return the rest as explanation. */
 function parseDiscordResponse(raw: string): { explanation: string; config?: any } {
   const match = raw.match(/```(?:json)?\n([\s\S]*?)```/)
@@ -30,8 +38,7 @@ export async function POST(request: NextRequest) {
     const prompt: string  = body.prompt ?? body.message ?? ''
     const guildId: string = body.guild_id ?? ''
     const guildName: string = body.guild_name ?? ''
-    const rawConvId: string | undefined = body.conversation_id ?? body.conversationId
-    const conversationId = rawConvId && !rawConvId.startsWith('local_') ? rawConvId : undefined
+    const conversationId = getConversationId(body.conversation_id ?? body.conversationId)
 
     if (!prompt) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });

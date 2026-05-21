@@ -30,7 +30,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to generate password setup link' }, { status: 500 });
     }
 
-    void sendCreatePasswordEmail(user.email, user.display_name, data.properties.action_link);
+    const emailResult = await sendCreatePasswordEmail(user.email, user.display_name, data.properties.action_link);
+    if (!emailResult.success) {
+      console.error('[create-password] Email send failed:', emailResult.error);
+      return NextResponse.json({ error: 'Failed to send password setup email' }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
