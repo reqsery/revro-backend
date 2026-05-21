@@ -27,6 +27,7 @@ type AICompatibleStreamEvent =
     };
 
 const MAX_OUTPUT_TOKENS = 4096;
+const DISCORD_MAX_OUTPUT_TOKENS = 8192;
 let openaiClient: OpenAI | null = null;
 
 // System prompts (you can load these from files later)
@@ -174,6 +175,17 @@ function normalizeUsage(usage: any): AICompatibleUsage {
   };
 }
 
+function getResponseOptions(context: RevroContext) {
+  if (context === 'discord') {
+    return {
+      max_output_tokens: DISCORD_MAX_OUTPUT_TOKENS,
+      reasoning: { effort: 'low' as const },
+    };
+  }
+
+  return { max_output_tokens: MAX_OUTPUT_TOKENS };
+}
+
 function getOutputText(response: any): string {
   if (typeof response.output_text === 'string') return response.output_text;
 
@@ -195,7 +207,7 @@ export async function* streamAI(
       model,
       instructions: getSystemPrompt(context),
       input: buildInput(userMessage, conversationHistory),
-      max_output_tokens: MAX_OUTPUT_TOKENS,
+      ...getResponseOptions(context),
       stream: true,
       stream_options: { include_obfuscation: false },
     });
@@ -239,11 +251,31 @@ export async function callAI(
       model,
       instructions: getSystemPrompt(context),
       input: buildInput(userMessage, conversationHistory),
-      max_output_tokens: MAX_OUTPUT_TOKENS,
+      ...getResponseOptions(context),
     });
 
+    const content = getOutputText(response);
+    if (!content.trim()) {
+      const incompleteReason = response.incomplete_details?.reason;
+      console.error('OpenAI empty text output:', {
+        context,
+        model,
+        status: response.status,
+        incompleteReason,
+        outputTypes: (response.output ?? []).map((item: any) => item?.type).filter(Boolean),
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+        reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens ?? 0,
+      });
+      throw new Error(
+        incompleteReason
+          ? `OpenAI response incomplete (${incompleteReason})`
+          : 'OpenAI returned no text output'
+      );
+    }
+
     return {
-      content: getOutputText(response),
+      content,
       usage: normalizeUsage(response.usage),
     };
   } catch (error: any) {
