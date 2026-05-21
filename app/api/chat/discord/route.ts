@@ -14,29 +14,33 @@ function getConversationId(value: unknown): string | undefined {
     : undefined
 }
 
+const DISCORD_PLAN_FALLBACK = 'I planned the Discord server structure. Review it below before building it.'
+const DISCORD_REPLY_FALLBACK = 'I could not finish that Discord server plan cleanly. Send the setup request again and I will rebuild it.'
+
 /** Try to pull a JSON block out of the AI response, return the rest as explanation. */
 function parseDiscordResponse(raw: string): { explanation: string; config?: any } {
-  const match = raw.match(/```(?:json)?\n([\s\S]*?)```/)
+  const trimmed = raw.trim()
+  const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (match) {
     try {
       const config = JSON.parse(match[1])
-      const explanation = raw.replace(/```(?:json)?\n[\s\S]*?```/g, '').trim()
+      const explanation = trimmed.replace(match[0], '').trim()
       return {
-        explanation: explanation || 'I planned the roles, categories, and channels for this server. Review the structure below before building it.',
+        explanation: explanation || DISCORD_PLAN_FALLBACK,
         config,
       }
     } catch {}
   }
   try {
-    const config = JSON.parse(raw)
+    const config = JSON.parse(trimmed)
     if (config?.roles || config?.categories) {
       return {
-        explanation: 'I planned the roles, categories, and channels for this server. Review the structure below before building it.',
+        explanation: DISCORD_PLAN_FALLBACK,
         config,
       }
     }
   } catch {}
-  return { explanation: raw }
+  return { explanation: trimmed || DISCORD_REPLY_FALLBACK }
 }
 
 export async function POST(request: NextRequest) {
@@ -100,6 +104,14 @@ export async function POST(request: NextRequest) {
       output_tokens: aiResponse.usage?.output_tokens,
     })
 
+    if (!aiResponse.content.trim()) {
+      console.error('[Discord chat] Empty AI response', {
+        model: actualModel,
+        promptLength: prompt.length,
+        historyLength: history.length,
+      })
+    }
+
     const { explanation, config } = parseDiscordResponse(aiResponse.content)
 
     // Save / create conversation
@@ -134,7 +146,7 @@ export async function POST(request: NextRequest) {
         .insert({
           conversation_id: convId,
           role: 'assistant',
-          content: aiResponse.content,
+          content: aiResponse.content.trim() || explanation,
           credits_cost: Math.ceil(cost),
           model_used: planModel,
         })
