@@ -35,7 +35,10 @@ export async function GET(
 
     if (msgErr) throw msgErr;
 
-    return NextResponse.json({ conversation: conv, messages: messages ?? [] });
+    return NextResponse.json(
+      { conversation: conv, messages: messages ?? [] },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
 
   } catch (err: any) {
     console.error('[Conversations] Error fetching messages:', err.message);

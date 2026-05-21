@@ -29,20 +29,6 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 });
     }
 
-    try {
-      const { data: authData } = await supabaseAdmin.auth.admin.getUserById(user.id);
-      const authError = (await supabaseAdmin.auth.admin.updateUserById(user.id, {
-        user_metadata: {
-          ...(authData?.user?.user_metadata ?? {}),
-          display_name: updated.display_name,
-          full_name: updated.display_name,
-        },
-      })).error;
-      if (authError) console.warn('[Update user] Auth metadata sync failed:', authError.message);
-    } catch (authErr) {
-      console.warn('[Update user] Auth metadata sync error:', authErr);
-    }
-
     const planConfig = PLAN_CONFIG[updated.plan as keyof typeof PLAN_CONFIG];
 
     return NextResponse.json({

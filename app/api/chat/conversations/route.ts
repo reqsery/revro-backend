@@ -31,9 +31,10 @@ export async function GET(request: NextRequest) {
       throw error;
     }
 
-    return NextResponse.json({
-      conversations: conversations || []
-    });
+    return NextResponse.json(
+      { conversations: conversations || [] },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
 
   } catch (error: any) {
     console.error('[Conversations list] Failed:', error?.message ?? 'Unknown error');

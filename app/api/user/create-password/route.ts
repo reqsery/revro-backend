@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       type: 'recovery',
       email: user.email,
       options: {
-        redirectTo: `${frontendUrl}/auth/callback`,
+        redirectTo: `${frontendUrl}/auth/callback?flow=recovery`,
       },
     });
 
