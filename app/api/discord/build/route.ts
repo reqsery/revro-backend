@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import { deductCredits } from '@/lib/credits';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
@@ -25,6 +26,19 @@ interface DiscordChannel {
 interface DiscordCategory {
   name: string;
   channels: DiscordChannel[];
+}
+
+interface PermissionOverwrite {
+  id: string;
+  type: 0;
+  allow: string;
+  deny: string;
+}
+
+interface CreatedRole {
+  id: string;
+  name: string;
+  permissions: string;
 }
 
 interface BuildPlan {
@@ -62,7 +76,8 @@ function getBotToken(): string {
 async function discordRequest(
   method: string,
   path: string,
-  body?: object
+  body?: object,
+  attempt = 0
 ): Promise<any> {
   const token = getBotToken();
   const res = await fetch(`${DISCORD_API}${path}`, {
@@ -73,6 +88,13 @@ async function discordRequest(
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  if (res.status === 429 && attempt < 3) {
+    const rateLimit = await res.json().catch(() => ({}));
+    const retryAfterMs = Math.ceil(Number((rateLimit as any)?.retry_after ?? 1) * 1000);
+    await sleep(Math.max(retryAfterMs, 250));
+    return discordRequest(method, path, body, attempt + 1);
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -86,6 +108,38 @@ async function discordRequest(
 
 // Small delay to respect Discord rate limits (5 requests per second per route)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const CHANNEL_PERMISSION_MASK = BigInt(1024) | BigInt(2048) | BigInt(8192);
+
+function getChannelPermissionBits(value: string | undefined): string {
+  try {
+    return String(BigInt(value ?? '0') & CHANNEL_PERMISSION_MASK);
+  } catch {
+    return '0';
+  }
+}
+
+function buildChannelOverwrites(guildId: string, roles: CreatedRole[]): PermissionOverwrite[] {
+  const roleOverwrites = roles
+    .map((role) => ({
+      id: role.id,
+      type: 0 as const,
+      allow: getChannelPermissionBits(role.permissions),
+      deny: '0',
+    }))
+    .filter((overwrite) => overwrite.allow !== '0');
+
+  return [
+    // Guild id is the @everyone role id in Discord permission overwrites.
+    { id: guildId, type: 0, allow: '1024', deny: '0' },
+    ...roleOverwrites,
+  ];
+}
+
+function recordBuildError(result: BuildResult, step: string, err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  result.errors.push(`${step}: ${message}`);
+  console.error('[Discord build] Step failed', { step, message });
+}
 
 async function scanExistingChannels(guildId: string): Promise<BuildPreview> {
   const channels: ExistingChannel[] = await discordRequest('GET', `/guilds/${guildId}/channels`);
@@ -156,6 +210,7 @@ export async function POST(request: NextRequest) {
     channelsDeleted: [],
     errors: [],
   };
+  const createdRoles: CreatedRole[] = [];
 
   // Replacing channels is destructive, so it only runs after an explicit
   // preview + confirmation from the frontend. Delete children before categories.
@@ -166,32 +221,39 @@ export async function POST(request: NextRequest) {
         try {
           await discordRequest('DELETE', `/channels/${channel.id}`);
           result.channelsDeleted.push(channel.name);
-          await sleep(300);
+          await sleep(125);
         } catch (err: any) {
-          result.errors.push(`Delete channel "${channel.name}": ${err.message}`);
+          recordBuildError(result, `Delete channel "${channel.name}"`, err);
         }
       }
     } catch (err: any) {
-      result.errors.push(`Scan existing channels: ${err.message}`);
+      recordBuildError(result, 'Scan existing channels', err);
     }
   }
 
   // ── 1. Create roles ────────────────────────────────────────────────────────
   for (const role of (plan.roles ?? [])) {
     try {
-      await discordRequest('POST', `/guilds/${guildId}/roles`, {
+      const created = await discordRequest('POST', `/guilds/${guildId}/roles`, {
         name: role.name,
         color: role.color ?? 0,
         hoist: role.hoist ?? false,
         mentionable: role.mentionable ?? false,
         permissions: role.permissions ?? '0',
       });
+      createdRoles.push({
+        id: created.id,
+        name: role.name,
+        permissions: role.permissions ?? '0',
+      });
       result.rolesCreated.push(role.name);
-      await sleep(300); // rate limit safety
+      await sleep(125); // rate limit safety
     } catch (err: any) {
-      result.errors.push(`Role "${role.name}": ${err.message}`);
+      recordBuildError(result, `Role "${role.name}"`, err);
     }
   }
+
+  const permissionOverwrites = buildChannelOverwrites(guildId, createdRoles);
 
   // ── 2. Create categories + their channels ─────────────────────────────────
   for (const category of (plan.categories ?? [])) {
@@ -202,12 +264,13 @@ export async function POST(request: NextRequest) {
       const created = await discordRequest('POST', `/guilds/${guildId}/channels`, {
         name: category.name.toUpperCase(),
         type: 4, // GUILD_CATEGORY
+        permission_overwrites: permissionOverwrites,
       });
       categoryId = created.id;
       result.categoriesCreated.push(category.name);
-      await sleep(300);
+      await sleep(125);
     } catch (err: any) {
-      result.errors.push(`Category "${category.name}": ${err.message}`);
+      recordBuildError(result, `Category "${category.name}"`, err);
       continue; // skip channels if category failed
     }
 
@@ -219,12 +282,13 @@ export async function POST(request: NextRequest) {
           name: channel.name.toLowerCase().replace(/\s+/g, '-'),
           type: channelType,
           parent_id: categoryId,
+          permission_overwrites: permissionOverwrites,
           ...(channel.topic && channelType === 0 ? { topic: channel.topic } : {}),
         });
         result.channelsCreated.push(`${category.name}/#${channel.name}`);
-        await sleep(300);
+        await sleep(125);
       } catch (err: any) {
-        result.errors.push(`Channel "${channel.name}": ${err.message}`);
+        recordBuildError(result, `Channel "${channel.name}"`, err);
       }
     }
   }
