@@ -3,9 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { sendWelcomeEmail } from '@/lib/email';
 import { fireResendEvent } from '@/lib/resend';
 import { hashPluginApiKey } from '@/lib/plugin-auth';
+import { PLAN_CONFIG } from '@/lib/credits';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
+const PLAN_FREE_WALLET = PLAN_CONFIG.free.wallet_monthly_usd;
 
 // Generate secure random API key
 function generateApiKey(): string {
@@ -68,8 +70,12 @@ export async function POST(request: NextRequest) {
         email,
         display_name: displayName || email.split('@')[0],
         plan: 'free',
+        plan_source: 'signup',
         credits_total: 25,
         credits_used: 0,
+        monthly_wallet_balance: PLAN_FREE_WALLET,
+        extra_wallet_balance: 0,
+        wallet_spent: 0,
         images_generated: 0,
         billing_cycle_start: new Date().toISOString()
       }, { onConflict: 'id' });

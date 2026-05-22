@@ -5,7 +5,7 @@ import {
   deductCredits,
   getModelForPlan,
   incrementImageCount,
-  tokensToCreditCost,
+  estimateTokenCostUsd,
   CREDIT_COSTS,
 } from '@/lib/credits';
 // CREDIT_COSTS is only used for IMAGE; everything else is token-based
@@ -128,13 +128,16 @@ Rules:
     'roblox',
     []
   );
-  const totalTokens = (result.usage?.input_tokens ?? 0) + (result.usage?.output_tokens ?? 0);
   return {
     prompts: parseImagePrompts(result.content, userPrompt).map((item) => ({
       ...item,
       prompt: item.prompt.replace(IMAGE_PROMPT_SLOP, '').replace(/\s+/g, ' ').trim(),
     })),
-    cost: totalTokens > 0 ? tokensToCreditCost(selection.logicalModel, totalTokens) : 0,
+    cost: estimateTokenCostUsd(
+      selection.actualModel,
+      result.usage?.input_tokens ?? 0,
+      result.usage?.output_tokens ?? 0,
+    ),
   };
 }
 
@@ -316,9 +319,16 @@ export async function POST(request: NextRequest) {
         ...getAIRoutingDebug('roblox', prompt, planModel),
         inputTokens: null,
         outputTokens: null,
-        creditsCharged: cost,
+        estimatedRealUsdCost: cost,
+        deductedWalletAmount: cost,
+        userId: user.id,
       });
-      const creditResult = await deductCredits(user.id, cost, 'image_refine', { model: selection.logicalModel });
+      const creditResult = await deductCredits(user.id, cost, 'image_refine', {
+        model: selection.logicalModel,
+        actualModel: selection.actualModel,
+        provider: selection.provider,
+        estimated_real_usd_cost: cost,
+      });
       const promptSummary = refinedPrompts.map(item => `${item.label}: ${item.prompt}`).join('\n\n');
       const { convId, messageId } = await saveMessages(
         user.id,
@@ -365,9 +375,16 @@ export async function POST(request: NextRequest) {
         geminiConfigured: !!process.env.GEMINI_API_KEY,
         inputTokens: null,
         outputTokens: null,
-        creditsCharged: cost,
+        estimatedRealUsdCost: cost,
+        deductedWalletAmount: cost,
+        userId: user.id,
       });
-      const creditResult = await deductCredits(user.id, cost, 'image_generation', { model: 'gpt-image-1.5' });
+      const creditResult = await deductCredits(user.id, cost, 'image_generation', {
+        model: 'gpt-image-1.5',
+        actualModel: 'gpt-image-1.5',
+        provider: 'openai',
+        estimated_real_usd_cost: cost,
+      });
       await incrementImageCount(user.id, prompts.length);
       const { convId, messageId } = await saveMessages(
         user.id,
@@ -394,15 +411,15 @@ export async function POST(request: NextRequest) {
 
     // ── Script / UI: streaming SSE with token-based billing ───────────────────
 
-    // Pre-flight: user must have at least 1 credit
+    // Pre-flight: user must have a positive AI Wallet balance.
     const { data: creditCheck } = await supabaseAdmin
       .from('users')
-      .select('credits_used, credits_total')
+      .select('monthly_wallet_balance, extra_wallet_balance')
       .eq('id', user.id)
       .single();
 
-    if (!creditCheck || (creditCheck.credits_total - creditCheck.credits_used) <= 0) {
-      return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
+    if (!creditCheck || (Number(creditCheck.monthly_wallet_balance ?? 0) + Number(creditCheck.extra_wallet_balance ?? 0)) <= 0) {
+      return NextResponse.json({ error: 'Insufficient AI Wallet balance' }, { status: 402 });
     }
 
     const encoder = new TextEncoder();
@@ -453,9 +470,7 @@ export async function POST(request: NextRequest) {
 
           // Calculate token-based cost
           const totalTokens = inputTokens + outputTokens;
-          const tokenCost   = totalTokens > 0
-            ? tokensToCreditCost(selection.logicalModel, totalTokens)
-            : 0;
+          const tokenCost = estimateTokenCostUsd(selection.actualModel, inputTokens, outputTokens);
 
           const creditResult = await deductCredits(user.id, tokenCost, `${type}_generation`, {
             model: selection.logicalModel,
@@ -464,6 +479,7 @@ export async function POST(request: NextRequest) {
             input_tokens: inputTokens,
             output_tokens: outputTokens,
             total_tokens: totalTokens,
+            estimated_real_usd_cost: tokenCost,
           });
           console.info('[AI generation]', {
             route: 'roblox_stream',
@@ -474,7 +490,9 @@ export async function POST(request: NextRequest) {
             inputTokenEstimate: estimateInputTokens(prompt, history),
             inputTokens,
             outputTokens,
-            creditsCharged: tokenCost,
+            estimatedRealUsdCost: tokenCost,
+            deductedWalletAmount: tokenCost,
+            userId: user.id,
           });
 
           const { convId, messageId } = await saveMessages(
@@ -530,8 +548,8 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('[Roblox chat] Error:', error);
-    if (error.message === 'Insufficient credits') {
-      return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
+    if (error.message === 'Insufficient AI Wallet balance') {
+      return NextResponse.json({ error: error.message }, { status: 402 });
     }
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }

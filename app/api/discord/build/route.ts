@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits } from '@/lib/credits';
+import { CREDIT_COSTS, deductCredits } from '@/lib/credits';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -258,12 +258,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Deduct 3 credits for building a server
+  // Deduct a small AI Wallet operation charge for the server build.
   try {
-    await deductCredits(user.id, 3, 'discord_build', { guild_id: guildId });
+    await deductCredits(user.id, CREDIT_COSTS.DISCORD_BUILD, 'discord_build', {
+      guild_id: guildId,
+      provider: 'discord',
+      model: 'builder',
+      estimated_real_usd_cost: CREDIT_COSTS.DISCORD_BUILD,
+    });
   } catch (err: any) {
-    if (err.message === 'Insufficient credits') {
-      return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
+    if (err.message === 'Insufficient AI Wallet balance') {
+      return NextResponse.json({ error: err.message }, { status: 402 });
     }
     throw err;
   }

@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { fireResendEvent } from '@/lib/resend';
+import { PLAN_CONFIG } from '@/lib/credits';
 
 export const dynamic = 'force-dynamic';
 
-// Vercel automatically sends Authorization: Bearer <CRON_SECRET> for cron routes
 function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // No secret configured — allow (useful in dev)
+  if (!secret) return true;
   return request.headers.get('authorization') === `Bearer ${secret}`;
+}
+
+function nextMonthlyCycleEnd(now: Date): string {
+  const end = new Date(now);
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  return end.toISOString();
 }
 
 export async function GET(request: NextRequest) {
@@ -18,8 +24,6 @@ export async function GET(request: NextRequest) {
 
   const now = new Date();
   const results = { deleted: 0, reset: 0, errors: [] as string[] };
-
-  // ── 1. Permanently delete users whose deletion_date has passed ────────────
 
   const { data: toDelete, error: fetchDeleteError } = await supabaseAdmin
     .from('users')
@@ -31,91 +35,79 @@ export async function GET(request: NextRequest) {
     console.error('[Cron] Failed to fetch deletions:', fetchDeleteError);
     results.errors.push('fetch_deletions: ' + fetchDeleteError.message);
   } else {
-    for (const user of (toDelete ?? [])) {
+    for (const user of toDelete ?? []) {
       try {
-        // Fire event before deletion so Resend still has the contact
         void fireResendEvent('user.account_deleted', user.email, user.display_name, {
           first_name: user.display_name,
         });
-
         await supabaseAdmin.from('users').delete().eq('id', user.id);
         await supabaseAdmin.auth.admin.deleteUser(user.id);
-
         results.deleted++;
-        console.log(`[Cron] Deleted ${user.email}`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[Cron] Failed to delete ${user.email}:`, msg);
-        results.errors.push(`delete_${user.id}: ${msg}`);
+        console.log('[Cron] Deleted user', { userId: user.id });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[Cron] Failed to delete user', { userId: user.id, message });
+        results.errors.push(`delete_${user.id}: ${message}`);
       }
     }
   }
 
-  // ── 2. Reset credits for users whose 30-day billing cycle has expired ─────
-
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
+  // Whop renewal webhooks are the primary reset path. This fallback prevents
+  // included monthly wallet balance from stacking if a cycle end passes first.
   const { data: toReset, error: fetchResetError } = await supabaseAdmin
     .from('users')
-    .select('id, email, display_name, plan, credits_used, credits_total, images_generated, billing_cycle_start')
-    .lte('billing_cycle_start', thirtyDaysAgo.toISOString())
-    .is('deletion_date', null); // Skip users pending deletion
+    .select('id, email, display_name, plan, wallet_spent, monthly_wallet_balance, images_generated, billing_cycle_start')
+    .neq('plan', 'free')
+    .lte('billing_cycle_end', now.toISOString())
+    .is('deletion_date', null);
 
   if (fetchResetError) {
-    console.error('[Cron] Failed to fetch credit resets:', fetchResetError);
+    console.error('[Cron] Failed to fetch wallet resets:', fetchResetError);
     results.errors.push('fetch_resets: ' + fetchResetError.message);
   } else {
-    for (const user of (toReset ?? [])) {
+    for (const user of toReset ?? []) {
       try {
-        const cycleStart = user.billing_cycle_start;
-        const monthName = new Date(cycleStart).toLocaleDateString('en-US', {
-          month: 'long', year: 'numeric',
-        });
-        const nextResetDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
-          .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+        const config = PLAN_CONFIG[user.plan as keyof typeof PLAN_CONFIG];
+        if (!config) {
+          console.warn('[Cron] Skipped unknown plan wallet reset', { userId: user.id, plan: user.plan });
+          continue;
+        }
 
-        // Fetch usage stats for the closing cycle
         const { data: logs } = await supabaseAdmin
           .from('usage_log')
           .select('action_type')
           .eq('user_id', user.id)
-          .gte('created_at', cycleStart);
-
+          .gte('created_at', user.billing_cycle_start);
         const entries = logs ?? [];
-        const scriptsCount = entries.filter(l => l.action_type === 'script_generation' || l.action_type === 'roblox_generation').length;
-        const uiCount     = entries.filter(l => l.action_type === 'ui_generation').length;
-        const discordCount = entries.filter(l => l.action_type === 'discord_generation').length;
 
         void fireResendEvent('user.monthly_summary', user.email, user.display_name, {
-          first_name:    user.display_name,
-          month:         monthName,
-          credits_used:  user.credits_used,
-          credits_total: user.credits_total,
-          scripts_count: scriptsCount,
-          ui_count:      uiCount,
-          images_count:  user.images_generated,
-          api_calls:     entries.length,
-          discord_count: discordCount,
-          reset_date:    nextResetDate,
+          first_name: user.display_name,
+          wallet_spent: user.wallet_spent,
+          wallet_remaining: user.monthly_wallet_balance,
+          scripts_count: entries.filter(log => log.action_type === 'script_generation' || log.action_type === 'roblox_generation').length,
+          ui_count: entries.filter(log => log.action_type === 'ui_generation').length,
+          images_count: user.images_generated,
+          api_calls: entries.length,
+          discord_count: entries.filter(log => log.action_type === 'discord_generation').length,
+          reset_date: nextMonthlyCycleEnd(now),
         });
 
-        await supabaseAdmin
-          .from('users')
-          .update({
-            credits_used:           0,
-            images_generated:       0,
-            low_credits_email_sent: false,
-            billing_cycle_start:    now.toISOString(),
-            updated_at:             now.toISOString(),
-          })
-          .eq('id', user.id);
+        const { error } = await supabaseAdmin.from('users').update({
+          monthly_wallet_balance: config.wallet_monthly_usd,
+          images_generated: 0,
+          low_credits_email_sent: false,
+          billing_cycle_start: now.toISOString(),
+          billing_cycle_end: nextMonthlyCycleEnd(now),
+          updated_at: now.toISOString(),
+        }).eq('id', user.id);
+        if (error) throw error;
 
         results.reset++;
-        console.log(`[Cron] Reset credits for ${user.email}`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[Cron] Failed to reset credits for ${user.email}:`, msg);
-        results.errors.push(`reset_${user.id}: ${msg}`);
+        console.log('[Cron] Reset included wallet', { userId: user.id, plan: user.plan });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[Cron] Failed to reset wallet', { userId: user.id, message });
+        results.errors.push(`reset_${user.id}: ${message}`);
       }
     }
   }

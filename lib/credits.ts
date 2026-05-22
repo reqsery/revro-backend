@@ -1,258 +1,271 @@
 import { supabaseAdmin } from './supabase';
 import { fireResendEvent } from './resend';
 
-// Credit costs for different actions
+// Legacy export name retained so route interfaces stay stable. Values are AI
+// Wallet USD deductions, not customer-facing credits.
 export const CREDIT_COSTS = {
-  // Roblox
-  SCRIPT_SIMPLE: 2,
-  SCRIPT_MEDIUM: 5,
-  SCRIPT_COMPLEX: 10,
-  SCRIPT_SYSTEM: 15,
-  UI_SIMPLE: 5,
-  UI_MEDIUM: 10,
-  UI_ADVANCED: 15,
-  IMAGE: 5,
-
-  // Discord
-  CHANNEL_CREATE: 1,
-  ROLE_CREATE: 1,
-  AUTOROLE: 1,
-  WELCOME_MESSAGE: 2,
-  PLANNING: 3,
-  BLUEPRINT: 5
+  SCRIPT_SIMPLE: 0.002,
+  SCRIPT_MEDIUM: 0.005,
+  SCRIPT_COMPLEX: 0.01,
+  SCRIPT_SYSTEM: 0.015,
+  UI_SIMPLE: 0.005,
+  UI_MEDIUM: 0.01,
+  UI_ADVANCED: 0.015,
+  IMAGE: 0.034,
+  CHANNEL_CREATE: 0.002,
+  ROLE_CREATE: 0.002,
+  AUTOROLE: 0.002,
+  WELCOME_MESSAGE: 0.004,
+  PLANNING: 0.01,
+  BLUEPRINT: 0.02,
+  DISCORD_BUILD: 0.02,
 };
 
-// Tokens per 1 credit, by model
-export const TOKEN_RATES: Record<string, number> = {
-  'codex-mini':     2000,
-  'codex-standard': 1000,
-  'codex-advanced':  800,
-  'codex-premium':   600,
-  'gemini-flash':   2500,
+// USD per 1M tokens. Keep these rates in one place so analytics and wallet
+// charges use the same cost estimate.
+export const MODEL_TOKEN_USD_PER_MILLION: Record<string, { input: number; output: number }> = {
+  'codex-mini': { input: 1.5, output: 6 },
+  'codex-standard': { input: 1.25, output: 10 },
+  'codex-advanced': { input: 1.25, output: 10 },
+  'codex-premium': { input: 1.25, output: 10 },
+  'codex-mini-latest': { input: 1.5, output: 6 },
+  'gpt-5.1-codex': { input: 1.25, output: 10 },
+  'gemini-flash': { input: 0.3, output: 2.5 },
+  'gemini-2.5-flash': { input: 0.3, output: 2.5 },
+  'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+  'gemini-3.1-flash-lite': { input: 0.1, output: 0.4 },
 };
 
-/**
- * Convert raw token count to exact decimal credits for a given plan model.
- * Returns a float rounded to 4 decimal places — e.g. 700 tokens on free plan = 0.7 credits.
- * No rounding up, no minimum — you pay exactly for what you use.
- */
-export function tokensToCreditCost(planModel: string, totalTokens: number): number {
-  const rate = TOKEN_RATES[planModel] ?? 1000;
-  return Math.round((totalTokens / rate) * 10000) / 10000; // 4dp precision
+export function estimateTokenCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+  const rate = MODEL_TOKEN_USD_PER_MILLION[model] ?? MODEL_TOKEN_USD_PER_MILLION['codex-standard'];
+  const cost = ((inputTokens * rate.input) + (outputTokens * rate.output)) / 1_000_000;
+  return Math.round(cost * 1_000_000) / 1_000_000;
 }
 
-// Plan configuration with OpenAI Codex models
+// Compatibility helper for older callers that only pass a total token count.
+// New generation routes should prefer estimateTokenCostUsd with real usage.
+export function tokensToCreditCost(planModel: string, totalTokens: number): number {
+  return estimateTokenCostUsd(planModel, totalTokens, 0);
+}
+
 export const PLAN_CONFIG = {
   free: {
     credits: 25,
+    wallet_monthly_usd: 0.5,
+    wallet_annual_usd: 0.5,
     images_max: 0,
     model: 'codex-mini',
-    display_name: 'Basic AI'
-  },
-  starter: {
-    credits: 150,
-    images_max: 0,
-    model: 'codex-standard',
-    display_name: 'Standard AI'
+    display_name: 'Basic AI',
   },
   pro: {
     credits: 500,
+    wallet_monthly_usd: 10,
+    wallet_annual_usd: 120,
     images_max: 50,
+    model: 'codex-standard',
+    display_name: 'Standard AI',
+  },
+  dev: {
+    credits: 150,
+    wallet_monthly_usd: 30,
+    wallet_annual_usd: 360,
+    images_max: 100,
     model: 'codex-premium',
-    display_name: 'Premium AI'
+    display_name: 'Premium AI',
   },
   studio: {
     credits: 1500,
+    wallet_monthly_usd: 85,
+    wallet_annual_usd: 1020,
     images_max: 150,
     model: 'codex-premium',
-    display_name: 'Premium AI'
-  }
+    display_name: 'Premium AI',
+  },
+  // Existing memberships can carry the pre-wallet key until Whop renews them.
+  starter: {
+    credits: 150,
+    wallet_monthly_usd: 30,
+    wallet_annual_usd: 360,
+    images_max: 100,
+    model: 'codex-premium',
+    display_name: 'Premium AI',
+  },
 };
 
-// Credits remaining at which a low-credits warning is sent per plan.
-// Free plan intentionally excluded — no email notifications for free users.
-const LOW_CREDIT_THRESHOLDS: Partial<Record<keyof typeof PLAN_CONFIG, number>> = {
-  starter: 20,
-  pro:     50,
-  studio:  150,
+const LOW_WALLET_THRESHOLDS: Partial<Record<keyof typeof PLAN_CONFIG, number>> = {
+  pro: 1,
+  dev: 3,
+  starter: 3,
+  studio: 8.5,
 };
 
-// Get AI model for user's plan
 export function getModelForPlan(plan: string): string {
   const config = PLAN_CONFIG[plan as keyof typeof PLAN_CONFIG];
   return config?.model || 'codex-mini';
 }
 
-// Check if user has enough credits
+function roundWallet(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
 export async function hasCredits(userId: string, cost: number): Promise<boolean> {
   const { data: user } = await supabaseAdmin
     .from('users')
-    .select('credits_used, credits_total')
+    .select('monthly_wallet_balance, extra_wallet_balance')
     .eq('id', userId)
     .single();
 
   if (!user) throw new Error('User not found');
-  return (user.credits_total - user.credits_used) >= cost;
+  return Number(user.monthly_wallet_balance ?? 0) + Number(user.extra_wallet_balance ?? 0) >= cost;
 }
 
-/**
- * Deduct credits from user.
- *
- * Uses two separate queries so a missing optional column (e.g. low_credits_email_sent
- * if not yet added to the schema) never blocks the actual credit deduction.
- * Usage-log insert and email notifications are soft-fail — they never prevent the
- * primary credit update from succeeding.
- */
 export async function deductCredits(
   userId: string,
   cost: number,
   actionType: string,
-  metadata: any = {}
-): Promise<{ success: boolean; creditsUsed: number; creditsRemaining: number }> {
-
-  // ── 1. Read current balance (minimal columns only) ─────────────────────────
-  const { data: creditRow, error: fetchErr } = await supabaseAdmin
+  metadata: any = {},
+): Promise<{
+  success: boolean;
+  creditsUsed: number;
+  creditsRemaining: number;
+  walletDeducted: number;
+  walletRemaining: number;
+}> {
+  const walletCost = roundWallet(Math.max(Number(cost) || 0, 0));
+  const { data: walletRow, error: fetchErr } = await supabaseAdmin
     .from('users')
-    .select('credits_used, credits_total')
+    .select('monthly_wallet_balance, extra_wallet_balance, wallet_spent, email, display_name, plan, billing_cycle_start')
     .eq('id', userId)
     .single();
 
-  if (fetchErr || !creditRow) throw new Error('User not found');
+  if (fetchErr || !walletRow) throw new Error('User not found');
 
-  const available = creditRow.credits_total - creditRow.credits_used;
-  if (available < cost) throw new Error('Insufficient credits');
+  const monthlyWallet = Number(walletRow.monthly_wallet_balance ?? 0);
+  const extraWallet = Number(walletRow.extra_wallet_balance ?? 0);
+  const available = monthlyWallet + extraWallet;
+  if (available < walletCost) throw new Error('Insufficient AI Wallet balance');
 
-  // Cap so credits_used never exceeds credits_total
-  const newCreditsUsed = Math.min(creditRow.credits_used + cost, creditRow.credits_total);
-  const remaining      = creditRow.credits_total - newCreditsUsed;
+  const fromMonthly = Math.min(monthlyWallet, walletCost);
+  const fromExtra = Math.max(walletCost - fromMonthly, 0);
+  const nextMonthlyWallet = roundWallet(Math.max(monthlyWallet - fromMonthly, 0));
+  const nextExtraWallet = roundWallet(Math.max(extraWallet - fromExtra, 0));
+  const remaining = roundWallet(nextMonthlyWallet + nextExtraWallet);
 
-  // ── 2. Write new balance ───────────────────────────────────────────────────
-  // Try with exact decimal first (works once credits_used column is NUMERIC).
-  // Fall back to Math.ceil if Postgres rejects the decimal (INTEGER column still in use).
-  let { error: updateErr } = await supabaseAdmin
+  const { error: updateErr } = await supabaseAdmin
     .from('users')
-    .update({ credits_used: newCreditsUsed, updated_at: new Date().toISOString() })
+    .update({
+      monthly_wallet_balance: nextMonthlyWallet,
+      extra_wallet_balance: nextExtraWallet,
+      wallet_spent: roundWallet(Number(walletRow.wallet_spent ?? 0) + walletCost),
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', userId);
 
-  if (updateErr?.message?.includes('invalid input syntax') || updateErr?.code === '22P02') {
-    const rounded = Math.ceil(newCreditsUsed);
-    const retry = await supabaseAdmin
-      .from('users')
-      .update({ credits_used: rounded, updated_at: new Date().toISOString() })
-      .eq('id', userId);
-    updateErr = retry.error;
-  }
+  if (updateErr) throw new Error(`AI Wallet update failed: ${updateErr.message}`);
 
-  if (updateErr) throw new Error(`Credits update failed: ${updateErr.message}`);
+  const usageMetadata = {
+    ...metadata,
+    estimated_real_usd_cost: metadata?.estimated_real_usd_cost ?? walletCost,
+    deducted_wallet_amount: walletCost,
+    wallet_remaining: remaining,
+  };
 
-  // ── 3. Log usage (soft fail — wrong schema never blocks credits) ───────────
   supabaseAdmin
     .from('usage_log')
     .insert({
       user_id: userId,
       action_type: actionType,
-      credits_cost: Math.ceil(cost),
+      credits_cost: Math.ceil(walletCost),
       model_used: metadata?.model ?? metadata?.actualModel ?? null,
-      metadata,
+      metadata: usageMetadata,
     })
     .then(({ error }) => {
-      if (error) console.warn('[Credits] Usage log failed:', error.message);
+      if (error) console.warn('[AI Wallet] Usage log failed:', error.message);
     });
 
-  // ── 4. Email notifications (fully soft-fail — two independent queries) ──────
-  //
-  // Query A: basic columns (email, name, plan) — always exists, used for both emails
-  // Query B: optional low_credits_email_sent — only used for the low-credits gate
-  // This way emails fire even if the migration for low_credits_email_sent hasn't run yet.
+  console.info('[AI Wallet] Charged', {
+    userId,
+    provider: metadata?.provider ?? null,
+    model: metadata?.actualModel ?? metadata?.model ?? null,
+    inputTokens: metadata?.input_tokens ?? null,
+    outputTokens: metadata?.output_tokens ?? null,
+    estimatedRealUsdCost: usageMetadata.estimated_real_usd_cost,
+    deductedWalletAmount: walletCost,
+    walletRemaining: remaining,
+  });
 
   void (async () => {
     try {
-      // Query A — columns that always exist
-      const { data: baseRow } = await supabaseAdmin
-        .from('users')
-        .select('email, display_name, plan, billing_cycle_start')
-        .eq('id', userId)
-        .single();
-
-      if (!baseRow) return;
+      if (walletRow.plan === 'free') return;
 
       const renewalDate = new Date(
-        new Date(baseRow.billing_cycle_start).getTime() + 30 * 24 * 60 * 60 * 1000
+        new Date(walletRow.billing_cycle_start).getTime() + 30 * 24 * 60 * 60 * 1000,
       ).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-      // ── Credits depleted ─────────────────────────────────────────────────
-      // Skip email notifications entirely for free plan users
-      if (baseRow.plan === 'free') return;
-
       if (remaining === 0) {
-        void fireResendEvent('user.credits_depleted', baseRow.email, baseRow.display_name, {
-          first_name:    baseRow.display_name,
-          credits_total: creditRow.credits_total,
-          plan_name:     baseRow.plan,
-          reset_date:    renewalDate,
+        void fireResendEvent('user.credits_depleted', walletRow.email, walletRow.display_name, {
+          first_name: walletRow.display_name,
+          wallet_remaining: 0,
+          plan_name: walletRow.plan,
+          reset_date: renewalDate,
         });
       }
 
-      // ── Low credits warning ──────────────────────────────────────────────
-      const plan      = baseRow.plan as keyof typeof PLAN_CONFIG;
-      const threshold = LOW_CREDIT_THRESHOLDS[plan];
+      const threshold = LOW_WALLET_THRESHOLDS[walletRow.plan as keyof typeof PLAN_CONFIG];
+      if (threshold === undefined || remaining <= 0 || remaining > threshold) return;
 
-      if (threshold !== undefined && remaining > 0 && remaining <= threshold) {
-        // Query B — optional column (soft fail if migration not yet run)
-        let alreadySent = false;
-        try {
-          const { data: flagRow } = await supabaseAdmin
-            .from('users')
-            .select('low_credits_email_sent')
-            .eq('id', userId)
-            .single();
-          alreadySent = flagRow?.low_credits_email_sent ?? false;
-        } catch {}
+      const { data: flagRow } = await supabaseAdmin
+        .from('users')
+        .select('low_credits_email_sent')
+        .eq('id', userId)
+        .single();
 
-        if (!alreadySent) {
-          // Best-effort update of the flag; ignore failure if column missing
-          try {
-            await supabaseAdmin
-              .from('users')
-              .update({ low_credits_email_sent: true })
-              .eq('id', userId);
-          } catch {}
+      if (flagRow?.low_credits_email_sent) return;
+      await supabaseAdmin
+        .from('users')
+        .update({ low_credits_email_sent: true })
+        .eq('id', userId);
 
-          void fireResendEvent('user.low_credits', baseRow.email, baseRow.display_name, {
-            first_name:       baseRow.display_name,
-            credits_remaining: remaining,
-            plan_name:        baseRow.plan,
-            renewal_date:     renewalDate,
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('[Credits] Email notification failed:', e);
+      void fireResendEvent('user.low_credits', walletRow.email, walletRow.display_name, {
+        first_name: walletRow.display_name,
+        wallet_remaining: remaining,
+        plan_name: walletRow.plan,
+        renewal_date: renewalDate,
+      });
+    } catch (error) {
+      console.warn('[AI Wallet] Email notification failed:', error);
     }
   })();
 
-  return { success: true, creditsUsed: newCreditsUsed, creditsRemaining: remaining };
+  return {
+    success: true,
+    // Old response aliases now carry AI Wallet USD while the SSE shape stays
+    // compatible with existing frontend consumers.
+    creditsUsed: walletCost,
+    creditsRemaining: remaining,
+    walletDeducted: walletCost,
+    walletRemaining: remaining,
+  };
 }
 
-// Get user's current credit balance
 export async function getCreditBalance(userId: string) {
   const { data: user } = await supabaseAdmin
     .from('users')
-    .select('credits_used, credits_total, plan')
+    .select('monthly_wallet_balance, extra_wallet_balance, wallet_spent, plan')
     .eq('id', userId)
     .single();
 
   if (!user) throw new Error('User not found');
 
+  const remaining = Number(user.monthly_wallet_balance ?? 0) + Number(user.extra_wallet_balance ?? 0);
   return {
-    used: user.credits_used,
-    total: user.credits_total,
-    remaining: user.credits_total - user.credits_used,
-    plan: user.plan
+    used: Number(user.wallet_spent ?? 0),
+    total: remaining,
+    remaining,
+    plan: user.plan,
   };
 }
 
-// Check if user can generate images
 export async function canGenerateImages(userId: string, count: number = 1) {
   const { data: user } = await supabaseAdmin
     .from('users')
@@ -272,14 +285,13 @@ export async function canGenerateImages(userId: string, count: number = 1) {
       allowed: false,
       reason: `Monthly image limit reached (${planConfig.images_max})`,
       current: user.images_generated,
-      max: planConfig.images_max
+      max: planConfig.images_max,
     };
   }
 
   return { allowed: true };
 }
 
-// Increment image generation count
 export async function incrementImageCount(userId: string, count: number = 1) {
   const { data: user } = await supabaseAdmin
     .from('users')

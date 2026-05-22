@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits, tokensToCreditCost, getModelForPlan } from '@/lib/credits';
+import { deductCredits, estimateTokenCostUsd, getModelForPlan } from '@/lib/credits';
 import { callAI, selectAIModel, estimateInputTokens, getAIRoutingDebug } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -33,8 +33,11 @@ export async function POST(request: NextRequest) {
     });
     const aiResponse = await callAI(selection, fullPrompt, 'bot', []);
 
-    const totalTokens = (aiResponse.usage?.input_tokens ?? 0) + (aiResponse.usage?.output_tokens ?? 0);
-    const cost = totalTokens > 0 ? tokensToCreditCost(selection.logicalModel, totalTokens) : 0;
+    const cost = estimateTokenCostUsd(
+      selection.actualModel,
+      aiResponse.usage?.input_tokens ?? 0,
+      aiResponse.usage?.output_tokens ?? 0,
+    );
 
     const creditResult = await deductCredits(user.id, cost, 'bot_generation', {
       model: selection.logicalModel,
@@ -42,6 +45,7 @@ export async function POST(request: NextRequest) {
       provider: selection.provider,
       input_tokens: aiResponse.usage?.input_tokens,
       output_tokens: aiResponse.usage?.output_tokens,
+      estimated_real_usd_cost: cost,
     });
     console.info('[AI generation]', {
       route: 'bot',
@@ -52,7 +56,9 @@ export async function POST(request: NextRequest) {
       inputTokenEstimate: estimateInputTokens(fullPrompt, []),
       inputTokens: aiResponse.usage?.input_tokens ?? 0,
       outputTokens: aiResponse.usage?.output_tokens ?? 0,
-      creditsCharged: cost,
+      estimatedRealUsdCost: cost,
+      deductedWalletAmount: cost,
+      userId: user.id,
     });
 
     // Extract code block from response
@@ -71,8 +77,8 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('[Bot chat] Error:', error);
-    if (error.message === 'Insufficient credits') {
-      return NextResponse.json({ error: 'Insufficient credits' }, { status: 402 });
+    if (error.message === 'Insufficient AI Wallet balance') {
+      return NextResponse.json({ error: error.message }, { status: 402 });
     }
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }

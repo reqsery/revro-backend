@@ -3,6 +3,7 @@ import { supabaseAdmin, supabaseServerAuth } from '@/lib/supabase';
 import { sendWelcomeEmail } from '@/lib/email';
 import { fireResendEvent } from '@/lib/resend';
 import { hashPluginApiKey } from '@/lib/plugin-auth';
+import { PLAN_CONFIG } from '@/lib/credits';
 import crypto from 'crypto';
 
 function generateApiKey(): string {
@@ -73,8 +74,12 @@ export async function getUser(request: NextRequest) {
       email,
       display_name: displayName,
       plan: 'free',
+      plan_source: 'signup',
       credits_total: 25,
       credits_used: 0,
+      monthly_wallet_balance: PLAN_CONFIG.free.wallet_monthly_usd,
+      extra_wallet_balance: 0,
+      wallet_spent: 0,
       images_generated: 0,
       billing_cycle_start: new Date().toISOString(),
     })

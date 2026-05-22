@@ -6,9 +6,9 @@ import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 type PlanKey = keyof typeof PLAN_CONFIG;
+type BillingInterval = 'monthly' | 'annual';
+type ProductPlan = { plan: PlanKey; interval: BillingInterval };
 
 interface WhopUser {
   id: string;
@@ -26,163 +26,147 @@ interface WhopMembership {
   metadata?: Record<string, unknown>;
 }
 
-interface WhopPayment {
-  id: string;
-  membership_id?: string;
-  user: WhopUser;
-  amount?: number;
-  status?: string;
-}
-
 interface WhopWebhookPayload {
   action: string;
-  data: WhopMembership | WhopPayment;
+  data: WhopMembership;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Verify Whop webhook signature.
- * Whop sends HMAC-SHA256 of the raw body, hex-encoded, in the "whop-signature" header.
- */
 function verifySignature(rawBody: string, signature: string, secret: string): boolean {
   if (!signature || !secret) return false;
   const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
   try {
-    const sigBuf = Buffer.from(signature, 'hex');
-    const expBuf = Buffer.from(expected, 'hex');
-    if (sigBuf.length !== expBuf.length) return false;
-    return crypto.timingSafeEqual(sigBuf, expBuf);
+    const signatureBuffer = Buffer.from(signature, 'hex');
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    return signatureBuffer.length === expectedBuffer.length
+      && crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
   } catch {
     return false;
   }
 }
 
-/**
- * Map a Whop product_id or plan_id to an internal plan key.
- *
- * Set these env vars in Vercel:
- *   WHOP_PRODUCT_STARTER   – product_id for the Starter plan
- *   WHOP_PRODUCT_PRO       – product_id for the Pro plan
- *   WHOP_PRODUCT_STUDIO    – product_id for the Studio plan
- *
- * If you have separate annual products, add:
- *   WHOP_PRODUCT_STARTER_ANNUAL, WHOP_PRODUCT_PRO_ANNUAL, WHOP_PRODUCT_STUDIO_ANNUAL
- */
-// ── Hardcoded plan/product ID → plan name mappings ───────────────────────────
-// Plan IDs come from the Whop dashboard (Settings → tab: Plugin & Bot in frontend)
-// These are the plan_ids shown on the pricing page
-const PLAN_ID_MAP: Record<string, PlanKey> = {
-  // Starter
-  'plan_yCxCQdTcuq3PB': 'starter', // monthly
-  'plan_A3XtiQtFwUQO2': 'starter', // yearly
-  // Pro
-  'plan_X2F8Ukz2xXIkE': 'pro',     // monthly
-  'plan_TF2t36B0XIYCy': 'pro',     // yearly
-  // Studio
-  'plan_NJdBfHx3gQxCF': 'studio',  // monthly
-  'plan_Ynaroe3Otw4QK': 'studio',  // yearly
+const PLAN_ID_MAP: Record<string, ProductPlan> = {
+  // Legacy Starter IDs now grant the new Dev entitlement.
+  plan_yCxCQdTcuq3PB: { plan: 'dev', interval: 'monthly' },
+  plan_A3XtiQtFwUQO2: { plan: 'dev', interval: 'annual' },
+  plan_X2F8Ukz2xXIkE: { plan: 'pro', interval: 'monthly' },
+  plan_TF2t36B0XIYCy: { plan: 'pro', interval: 'annual' },
+  plan_NJdBfHx3gQxCF: { plan: 'studio', interval: 'monthly' },
+  plan_Ynaroe3Otw4QK: { plan: 'studio', interval: 'annual' },
 };
 
-// Credit pack product IDs (one-time purchases)
-const CREDIT_PACK_MAP: Record<string, number> = {
-  'prod_bQhlR7Fonc4Oy': 50,   // Small  — $5
-  'prod_ii4z8el4KTeXA': 150,  // Medium — $12
-  'prod_ykaAhgAMdOI7Y': 500,  // Large  — $35
+const LEGACY_TOPUP_PRODUCTS: Record<string, number> = {
+  prod_bQhlR7Fonc4Oy: 5,
+  prod_ii4z8el4KTeXA: 10,
+  prod_ykaAhgAMdOI7Y: 25,
 };
 
-function buildCreditPackMap(): Record<string, number> {
-  // Start with hardcoded values, then layer in any env overrides
-  const map: Record<string, number> = { ...CREDIT_PACK_MAP };
-  const packs: [string, number][] = [
-    ['WHOP_PACK_SMALL',  50],
-    ['WHOP_PACK_MEDIUM', 150],
-    ['WHOP_PACK_LARGE',  500],
+function buildProductMap(): Record<string, ProductPlan> {
+  const map: Record<string, ProductPlan> = {};
+  const entries: [string, PlanKey, BillingInterval][] = [
+    ['WHOP_PRODUCT_DEV', 'dev', 'monthly'],
+    ['WHOP_PRODUCT_DEV_ANNUAL', 'dev', 'annual'],
+    ['WHOP_PRODUCT_STARTER', 'dev', 'monthly'],
+    ['WHOP_PRODUCT_STARTER_ANNUAL', 'dev', 'annual'],
+    ['WHOP_PRODUCT_PRO', 'pro', 'monthly'],
+    ['WHOP_PRODUCT_PRO_ANNUAL', 'pro', 'annual'],
+    ['WHOP_PRODUCT_STUDIO', 'studio', 'monthly'],
+    ['WHOP_PRODUCT_STUDIO_ANNUAL', 'studio', 'annual'],
   ];
-  for (const [envKey, credits] of packs) {
-    const id = process.env[envKey];
-    if (id) map[id] = credits;
+  for (const [envKey, plan, interval] of entries) {
+    const productId = process.env[envKey];
+    if (productId) map[productId] = { plan, interval };
   }
   return map;
 }
 
-function buildProductMap(): Record<string, PlanKey> {
-  // Start with hardcoded plan IDs, then layer in any env overrides
-  const map: Record<string, PlanKey> = {};
-  const pairs: [string, PlanKey][] = [
-    ['WHOP_PRODUCT_STARTER',        'starter'],
-    ['WHOP_PRODUCT_STARTER_ANNUAL', 'starter'],
-    ['WHOP_PRODUCT_PRO',            'pro'],
-    ['WHOP_PRODUCT_PRO_ANNUAL',     'pro'],
-    ['WHOP_PRODUCT_STUDIO',         'studio'],
-    ['WHOP_PRODUCT_STUDIO_ANNUAL',  'studio'],
+function buildTopupMap(): Record<string, number> {
+  const map = { ...LEGACY_TOPUP_PRODUCTS };
+  const entries: [string, number][] = [
+    ['WHOP_TOPUP_5', 5],
+    ['WHOP_TOPUP_10', 10],
+    ['WHOP_TOPUP_25', 25],
+    ['WHOP_TOPUP_50', 50],
   ];
-  for (const [envKey, plan] of pairs) {
-    const id = process.env[envKey];
-    if (id) map[id] = plan;
+  for (const [envKey, walletUsd] of entries) {
+    const productId = process.env[envKey];
+    if (productId) map[productId] = walletUsd;
   }
   return map;
 }
 
-/** Map a product_id OR plan_id to a plan key. Checks plan IDs first (always works),
- *  then falls back to product IDs from env vars. */
-function planFromProductId(productId: string): PlanKey | null {
+function productPlan(productId: string): ProductPlan | null {
   return PLAN_ID_MAP[productId] ?? buildProductMap()[productId] ?? null;
+}
+
+function getCycleEnd(interval: BillingInterval): string {
+  const end = new Date();
+  end.setUTCMonth(end.getUTCMonth() + (interval === 'annual' ? 12 : 1));
+  return end.toISOString();
 }
 
 async function findUser(email: string) {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, plan, credits_used, credits_total')
+    .select('id, email, plan, extra_wallet_balance')
     .eq('email', email.toLowerCase())
     .single();
-  if (error || !data) return null;
-  return data;
+  return error || !data ? null : data;
 }
 
-async function applyPlan(userId: string, plan: PlanKey, resetCycle: boolean): Promise<void> {
-  const config = PLAN_CONFIG[plan];
+async function applyPlan(userId: string, product: ProductPlan, resetCycle: boolean): Promise<void> {
+  const config = PLAN_CONFIG[product.plan];
+  const now = new Date().toISOString();
   const patch: Record<string, unknown> = {
-    plan,
-    credits_total: config.credits,
-    updated_at: new Date().toISOString(),
+    plan: product.plan,
+    plan_source: 'whop',
+    monthly_wallet_balance: product.interval === 'annual'
+      ? config.wallet_annual_usd
+      : config.wallet_monthly_usd,
+    billing_cycle_end: getCycleEnd(product.interval),
+    updated_at: now,
   };
+
   if (resetCycle) {
-    patch.credits_used        = 0;
-    patch.images_generated    = 0;
-    patch.billing_cycle_start = new Date().toISOString();
+    patch.images_generated = 0;
+    patch.low_credits_email_sent = false;
+    patch.billing_cycle_start = now;
   }
+
   const { error } = await supabaseAdmin.from('users').update(patch).eq('id', userId);
   if (error) throw new Error(`DB update failed: ${error.message}`);
 }
 
 async function downgradeToFree(userId: string): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from('users')
-    .update({
-      plan:                'free',
-      credits_total:       PLAN_CONFIG.free.credits,
-      credits_used:        0,
-      images_generated:    0,
-      billing_cycle_start: new Date().toISOString(),
-      updated_at:          new Date().toISOString(),
-    })
-    .eq('id', userId);
+  const now = new Date().toISOString();
+  const { error } = await supabaseAdmin.from('users').update({
+    plan: 'free',
+    plan_source: 'whop_cancelled',
+    monthly_wallet_balance: 0,
+    images_generated: 0,
+    billing_cycle_start: now,
+    billing_cycle_end: null,
+    updated_at: now,
+  }).eq('id', userId);
   if (error) throw new Error(`DB update failed: ${error.message}`);
 }
 
-// ── Route handler ─────────────────────────────────────────────────────────────
+async function addTopup(userId: string, currentExtraWallet: unknown, walletUsd: number): Promise<void> {
+  const { error } = await supabaseAdmin.from('users').update({
+    extra_wallet_balance: Number(currentExtraWallet ?? 0) + walletUsd,
+    updated_at: new Date().toISOString(),
+  }).eq('id', userId);
+  if (error) throw new Error(`DB update failed: ${error.message}`);
+}
 
 export async function POST(request: NextRequest) {
-  const secret    = process.env.WHOP_WEBHOOK_SECRET ?? '';
-  const rawBody   = await request.text();
+  const secret = process.env.WHOP_WEBHOOK_SECRET ?? '';
+  const rawBody = await request.text();
   const signature = request.headers.get('whop-signature') ?? '';
 
   if (!secret) {
     console.error('[Whop] WHOP_WEBHOOK_SECRET is not set');
     return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
   }
-
   if (!verifySignature(rawBody, signature, secret)) {
     console.warn('[Whop] Rejected: invalid signature');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
@@ -195,142 +179,84 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { action, data } = payload;
-  const membership = data as WhopMembership;
-  const userEmail  = membership.user?.email?.toLowerCase().trim() ?? '';
-
-  console.log(`[Whop] ${action} | email: ${userEmail || '(none)'}`);
-
-  if (!userEmail) {
-    console.error('[Whop] No user email in payload');
-    return NextResponse.json({ error: 'No user email in payload' }, { status: 400 });
-  }
+  const { action, data: membership } = payload;
+  const userEmail = membership.user?.email?.toLowerCase().trim() ?? '';
+  const productId = membership.plan_id ?? membership.product_id ?? '';
+  console.log('[Whop] Received', { action, email: userEmail || '(none)', productId });
+  if (!userEmail) return NextResponse.json({ error: 'No user email in payload' }, { status: 400 });
 
   try {
-    switch (action) {
+    const user = await findUser(userEmail);
+    if (!user && action !== 'payment.failed') {
+      console.error('[Whop] User not found:', userEmail);
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
 
-      // ── membership.created / membership.went_valid ───────────────────────
-      // New purchase: upgrade plan and reset billing cycle
-      case 'membership.created':
-      case 'membership.went_valid': {
-        // Try plan_id first (always hardcoded), then product_id (may need env vars)
-        const plan = planFromProductId(membership.plan_id ?? '') ?? planFromProductId(membership.product_id ?? '');
-        if (!plan) {
-          console.warn(`[Whop] Unknown plan/product: plan_id="${membership.plan_id}" product_id="${membership.product_id}" — skipping`);
-          return NextResponse.json({ received: true, note: 'Unknown product, skipped' });
-        }
-
-        const user = await findUser(userEmail);
-        if (!user) {
-          console.error(`[Whop] User not found: ${userEmail}`);
-          return NextResponse.json({ error: 'User not found' }, { status: 404 });
-        }
-
-        const planChanged = user.plan !== plan;
-        await applyPlan(user.id, plan, planChanged);
-        console.log(`[Whop] ${action}: ${userEmail} → ${plan}${planChanged ? ' (cycle reset)' : ''}`);
-
-        // Send payment confirmation email on new purchase
-        if (planChanged) {
-          sendPaymentConfirmationEmail(
-            userEmail,
-            userEmail.split('@')[0],
-            plan.charAt(0).toUpperCase() + plan.slice(1),
-            '',   // amount not in webhook
-            'Monthly',
-            'Next billing cycle',
-            membership.id ?? '',
-          ).catch(() => {});
-        }
-        break;
+    if (action === 'membership.created' || action === 'membership.went_valid') {
+      const planProduct = productPlan(membership.plan_id ?? '') ?? productPlan(membership.product_id ?? '');
+      if (!planProduct) {
+        console.warn('[Whop] Unknown plan product ignored', { productId });
+        return NextResponse.json({ received: true, note: 'Unknown product, skipped' });
       }
-
-      // ── membership.renewed / payment.succeeded ────────────────────────────
-      case 'membership.renewed':
-      case 'payment.succeeded': {
-        const user = await findUser(userEmail);
-        if (!user) {
-          console.error(`[Whop] User not found: ${userEmail}`);
-          return NextResponse.json({ error: 'User not found' }, { status: 404 });
-        }
-
-        const productId = membership.product_id ?? membership.plan_id ?? '';
-
-        // ── Credit pack (one-time purchase) ──────────────────────────────
-        const creditPackMap = buildCreditPackMap();
-        const packCredits   = creditPackMap[productId];
-        if (packCredits !== undefined) {
-          // Free plan users cannot buy credit packs
-          if (user.plan === 'free') {
-            console.warn(`[Whop] Credit pack rejected — user ${userEmail} is on free plan`);
-            break;
-          }
-          // Add credits on top of existing total — don't reset credits_used
-          const newTotal = user.credits_total + packCredits;
-          await supabaseAdmin
-            .from('users')
-            .update({ credits_total: newTotal, updated_at: new Date().toISOString() })
-            .eq('id', user.id);
-          console.log(`[Whop] Credit pack: ${userEmail} +${packCredits} credits (total: ${newTotal})`);
-          break;
-        }
-
-        // ── Subscription renewal — reset billing cycle ────────────────────
-        const plan = planFromProductId(membership.plan_id ?? '') ?? planFromProductId(productId) ?? (user.plan as PlanKey);
-        if (!PLAN_CONFIG[plan] || plan === 'free') break;
-
-        await applyPlan(user.id, plan, true);
-        console.log(`[Whop] ${action}: ${userEmail} → credits reset (plan: ${plan})`);
-        break;
-      }
-
-      // ── membership.cancelled / membership.expired / membership.went_invalid
-      // Downgrade to free plan
-      case 'membership.cancelled':
-      case 'membership.expired':
-      case 'membership.went_invalid': {
-        const user = await findUser(userEmail);
-        if (!user) {
-          console.error(`[Whop] User not found: ${userEmail}`);
-          return NextResponse.json({ error: 'User not found' }, { status: 404 });
-        }
-
-        const oldPlan = user.plan;
-        await downgradeToFree(user.id);
-        console.log(`[Whop] ${action}: ${userEmail} → downgraded to free`);
-
-        // Send cancellation email
-        sendSubscriptionCancelledEmail(
+      const changed = user!.plan !== planProduct.plan;
+      await applyPlan(user!.id, planProduct, true);
+      console.log('[Whop] Plan applied', { userId: user!.id, plan: planProduct.plan, interval: planProduct.interval });
+      if (changed) {
+        sendPaymentConfirmationEmail(
           userEmail,
           userEmail.split('@')[0],
-          oldPlan.charAt(0).toUpperCase() + oldPlan.slice(1),
-          'now',
+          planProduct.plan.charAt(0).toUpperCase() + planProduct.plan.slice(1),
+          '',
+          planProduct.interval === 'annual' ? 'Annual' : 'Monthly',
+          'Next billing cycle',
+          membership.id ?? '',
         ).catch(() => {});
-        break;
       }
-
-      // ── payment.failed ────────────────────────────────────────────────────
-      // Notify user — Whop handles retries, don't revoke access yet
-      case 'payment.failed': {
-        console.warn(`[Whop] payment.failed: ${userEmail}`);
-        const user = await findUser(userEmail);
-        sendPaymentFailedEmail(
-          userEmail,
-          user ? (userEmail.split('@')[0]) : userEmail,
-          user ? (user.plan.charAt(0).toUpperCase() + user.plan.slice(1)) : 'your',
-        ).catch(() => {});
-        break;
+    } else if (action === 'membership.renewed' || action === 'payment.succeeded') {
+      const topup = buildTopupMap()[membership.product_id ?? productId];
+      if (topup !== undefined) {
+        await addTopup(user!.id, user!.extra_wallet_balance, topup);
+        console.log('[Whop] Wallet top-up applied', { userId: user!.id, walletUsd: topup });
+      } else {
+        const planProduct = productPlan(membership.plan_id ?? '') ?? productPlan(productId);
+        if (planProduct && planProduct.plan !== 'free') {
+          await applyPlan(user!.id, planProduct, true);
+          console.log('[Whop] Included wallet reset', {
+            userId: user!.id,
+            plan: planProduct.plan,
+            interval: planProduct.interval,
+          });
+        }
       }
-
-      default:
-        console.log(`[Whop] Unhandled action "${action}" — acknowledged`);
+    } else if (
+      action === 'membership.cancelled'
+      || action === 'membership.expired'
+      || action === 'membership.went_invalid'
+    ) {
+      const oldPlan = user!.plan;
+      await downgradeToFree(user!.id);
+      console.log('[Whop] Plan downgraded', { userId: user!.id, oldPlan });
+      sendSubscriptionCancelledEmail(
+        userEmail,
+        userEmail.split('@')[0],
+        oldPlan.charAt(0).toUpperCase() + oldPlan.slice(1),
+        'now',
+      ).catch(() => {});
+    } else if (action === 'payment.failed') {
+      console.warn('[Whop] payment.failed:', userEmail);
+      sendPaymentFailedEmail(
+        userEmail,
+        userEmail.split('@')[0],
+        user ? user.plan.charAt(0).toUpperCase() + user.plan.slice(1) : 'your',
+      ).catch(() => {});
+    } else {
+      console.log('[Whop] Unhandled action acknowledged:', action);
     }
 
     return NextResponse.json({ received: true });
-
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[Whop] Error handling "${action}":`, message);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[Whop] Error handling action', { action, message });
     return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }

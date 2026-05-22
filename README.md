@@ -1,5 +1,10 @@
 # Revro Backend
 
+Revro uses Whop plan entitlements and an AI Wallet usage balance. `plan` and
+`plan_source` control feature access; `monthly_wallet_balance` and
+`extra_wallet_balance` control spend only. Apply `ai-wallet-migration.sql`
+before deploying wallet-aware API changes.
+
 AI-powered platform for Roblox and Discord creators. Generate scripts, UI elements, and Discord server setups with AI.
 
 For support, updates, and early features, join the Discord: https://discord.gg/vV2USr9phF
