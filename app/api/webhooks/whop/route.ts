@@ -86,6 +86,10 @@ function buildTopupMap(): Record<string, number> {
     ['WHOP_TOPUP_10', 10],
     ['WHOP_TOPUP_25', 25],
     ['WHOP_TOPUP_50', 50],
+    // Keep existing production env names valid during Whop product migration.
+    ['WHOP_PACK_SMALL', 5],
+    ['WHOP_PACK_MEDIUM', 10],
+    ['WHOP_PACK_LARGE', 25],
   ];
   for (const [envKey, walletUsd] of entries) {
     const productId = process.env[envKey];
