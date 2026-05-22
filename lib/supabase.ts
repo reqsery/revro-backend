@@ -38,5 +38,10 @@ export const supabaseAdmin = createClient(
       persistSession: false,
       detectSessionInUrl: false,
     },
+    global: {
+      headers: {
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY!}`,
+      },
+    },
   }
 );
