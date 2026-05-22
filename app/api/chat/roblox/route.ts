@@ -432,7 +432,8 @@ export async function POST(request: NextRequest) {
             if (chunk.type === 'message_start') {
               inputTokens = chunk.message?.usage?.input_tokens ?? 0;
             } else if (chunk.type === 'message_delta') {
-              outputTokens = (chunk as any).usage?.output_tokens ?? 0;
+              inputTokens = chunk.usage?.input_tokens || inputTokens;
+              outputTokens = chunk.usage?.output_tokens ?? 0;
             } else if (
               chunk.type === 'content_block_delta' &&
               chunk.delta.type === 'text_delta'
