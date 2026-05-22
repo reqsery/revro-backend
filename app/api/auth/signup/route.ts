@@ -59,10 +59,11 @@ export async function POST(request: NextRequest) {
     // Generate API key
     const apiKey = generateApiKey();
 
-    // Create user record in users table
+    // The auth.users trigger normally creates this profile first. Upsert keeps
+    // signup idempotent if that trigger already inserted the row.
     const { error: dbError } = await supabaseAdmin
       .from('users')
-      .insert({
+      .upsert({
         id: userId,
         email,
         display_name: displayName || email.split('@')[0],
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
         credits_used: 0,
         images_generated: 0,
         billing_cycle_start: new Date().toISOString()
-      });
+      }, { onConflict: 'id' });
 
     if (dbError) {
       console.error('DB insert error:', dbError);
