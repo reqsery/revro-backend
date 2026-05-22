@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase';
+import { supabase, supabaseAdmin } from '@/lib/supabase';
 import { sendWelcomeEmail } from '@/lib/email';
 import { fireResendEvent } from '@/lib/resend';
 import crypto from 'crypto';
@@ -18,7 +18,7 @@ export async function getUser(request: NextRequest) {
     if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
 
     const token = authHeader.substring(7);
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error || !user) return null;
 
     // Try to load existing DB record
