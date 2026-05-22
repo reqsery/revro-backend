@@ -6,6 +6,11 @@ alter table public.users
   add column if not exists plan_source text not null default 'legacy',
   add column if not exists billing_cycle_end timestamp without time zone;
 
+alter table public.users drop constraint if exists users_plan_check;
+alter table public.users
+  add constraint users_plan_check
+  check (plan = any (array['free'::text, 'starter'::text, 'pro'::text, 'dev'::text, 'studio'::text]));
+
 update public.users
 set
   plan = case when plan = 'starter' then 'dev' else plan end,
