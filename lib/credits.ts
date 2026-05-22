@@ -28,6 +28,7 @@ export const TOKEN_RATES: Record<string, number> = {
   'codex-standard': 1000,
   'codex-advanced':  800,
   'codex-premium':   600,
+  'gemini-flash':   2500,
 };
 
 /**
@@ -45,14 +46,14 @@ export const PLAN_CONFIG = {
   free: {
     credits: 25,
     images_max: 0,
-    model: 'codex-standard',
-    display_name: 'Standard AI'
+    model: 'codex-mini',
+    display_name: 'Basic AI'
   },
   starter: {
     credits: 150,
     images_max: 0,
-    model: 'codex-advanced',
-    display_name: 'Advanced AI'
+    model: 'codex-standard',
+    display_name: 'Standard AI'
   },
   pro: {
     credits: 500,
@@ -79,7 +80,7 @@ const LOW_CREDIT_THRESHOLDS: Partial<Record<keyof typeof PLAN_CONFIG, number>> =
 // Get AI model for user's plan
 export function getModelForPlan(plan: string): string {
   const config = PLAN_CONFIG[plan as keyof typeof PLAN_CONFIG];
-  return config?.model || 'codex-standard';
+  return config?.model || 'codex-mini';
 }
 
 // Check if user has enough credits

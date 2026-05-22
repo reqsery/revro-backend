@@ -48,9 +48,14 @@ interface BuildPlan {
 
 interface BuildResult {
   rolesCreated: string[];
+  rolesReused: string[];
   categoriesCreated: string[];
+  categoriesReused: string[];
   channelsCreated: string[];
+  channelsReused: string[];
   channelsDeleted: string[];
+  skipped: string[];
+  failed: string[];
   errors: string[];
 }
 
@@ -58,6 +63,13 @@ interface ExistingChannel {
   id: string;
   name: string;
   type: number;
+  parent_id?: string | null;
+}
+
+interface ExistingRole {
+  id: string;
+  name: string;
+  permissions: string;
 }
 
 interface DiscordGuildState {
@@ -161,8 +173,14 @@ function buildChannelOverwrites(guildId: string, roles: CreatedRole[]): Permissi
 
 function recordBuildError(result: BuildResult, step: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
-  result.errors.push(`${step}: ${message}`);
+  const detail = `${step}: ${message}`;
+  result.failed.push(detail);
+  result.errors.push(detail);
   console.error('[Discord build] Step failed', { step, message });
+}
+
+function recordBuildStep(operation: string, detail: string) {
+  console.info('[Discord build] Step complete', { operation, detail });
 }
 
 function getChannelType(channel: DiscordChannel): number {
@@ -170,6 +188,22 @@ function getChannelType(channel: DiscordChannel): number {
   if (channel.type === 'announcement') return 5; // GUILD_ANNOUNCEMENT
   if (channel.type === 'forum') return 15; // GUILD_FORUM
   return 0; // GUILD_TEXT
+}
+
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function normalizeChannelName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function getUniqueChannelName(name: string, existingNames: Set<string>): string {
+  if (!existingNames.has(normalizeName(name))) return name;
+
+  let suffix = 2;
+  while (existingNames.has(normalizeName(`${name}-${suffix}`))) suffix += 1;
+  return `${name}-${suffix}`;
 }
 
 async function scanExistingChannels(guildId: string): Promise<BuildPreview> {
@@ -236,9 +270,14 @@ export async function POST(request: NextRequest) {
 
   const result: BuildResult = {
     rolesCreated: [],
+    rolesReused: [],
     categoriesCreated: [],
+    categoriesReused: [],
     channelsCreated: [],
+    channelsReused: [],
     channelsDeleted: [],
+    skipped: [],
+    failed: [],
     errors: [],
   };
   const createdRoles: CreatedRole[] = [];
@@ -254,12 +293,15 @@ export async function POST(request: NextRequest) {
       const preview = await scanExistingChannels(guildId);
       for (const channel of [...preview.channels, ...preview.categories]) {
         if (protectedChannelIds.has(channel.id)) {
-          result.errors.push(`Protected Community channel kept: "${channel.name}"`);
+          const detail = `Protected Community channel kept: "${channel.name}"`;
+          result.skipped.push(detail);
+          console.warn('[Discord build] Step skipped', { operation: 'delete_channel', detail });
           continue;
         }
         try {
           await discordRequest('DELETE', `/channels/${channel.id}`);
           result.channelsDeleted.push(channel.name);
+          recordBuildStep('delete_channel', channel.name);
           await sleep(125);
         } catch (err: any) {
           recordBuildError(result, `Delete channel "${channel.name}"`, err);
@@ -270,10 +312,33 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  let existingChannels: ExistingChannel[] = [];
+  let existingRoles: ExistingRole[] = [];
+  try {
+    [existingChannels, existingRoles] = await Promise.all([
+      discordRequest('GET', `/guilds/${guildId}/channels`),
+      discordRequest('GET', `/guilds/${guildId}/roles`),
+    ]);
+  } catch (err) {
+    recordBuildError(result, 'Read existing Discord resources', err);
+  }
+
   // ── 1. Create roles ────────────────────────────────────────────────────────
   for (const role of (plan.roles ?? [])) {
     try {
       const permissions = normalizeRolePermissions(role.permissions);
+      const existingRole = existingRoles.find(item => normalizeName(item.name) === normalizeName(role.name));
+      if (existingRole) {
+        createdRoles.push({
+          id: existingRole.id,
+          name: existingRole.name,
+          permissions: normalizeRolePermissions(existingRole.permissions || permissions),
+        });
+        result.rolesReused.push(existingRole.name);
+        recordBuildStep('reuse_role', existingRole.name);
+        continue;
+      }
+
       const created = await discordRequest('POST', `/guilds/${guildId}/roles`, {
         name: role.name,
         color: role.color ?? 0,
@@ -281,12 +346,14 @@ export async function POST(request: NextRequest) {
         mentionable: role.mentionable ?? false,
         permissions,
       });
+      existingRoles.push(created);
       createdRoles.push({
         id: created.id,
         name: role.name,
         permissions,
       });
       result.rolesCreated.push(role.name);
+      recordBuildStep('create_role', role.name);
       await sleep(125); // rate limit safety
     } catch (err: any) {
       recordBuildError(result, `Role "${role.name}"`, err);
@@ -298,34 +365,65 @@ export async function POST(request: NextRequest) {
   // ── 2. Create categories + their channels ─────────────────────────────────
   for (const category of (plan.categories ?? [])) {
     let categoryId: string | null = null;
+    const desiredCategoryName = category.name.toUpperCase();
+    const existingCategory = existingChannels.find(channel =>
+      channel.type === 4 && normalizeName(channel.name) === normalizeName(desiredCategoryName)
+    );
 
-    // Create the category (type 4)
-    try {
-      const created = await discordRequest('POST', `/guilds/${guildId}/channels`, {
-        name: category.name.toUpperCase(),
-        type: 4, // GUILD_CATEGORY
-        permission_overwrites: permissionOverwrites,
-      });
-      categoryId = created.id;
-      result.categoriesCreated.push(category.name);
-      await sleep(125);
-    } catch (err: any) {
-      recordBuildError(result, `Category "${category.name}"`, err);
-      continue; // skip channels if category failed
+    if (existingCategory) {
+      categoryId = existingCategory.id;
+      result.categoriesReused.push(category.name);
+      recordBuildStep('reuse_category', category.name);
+    } else {
+      try {
+        const existingNames = new Set(existingChannels.map(channel => normalizeName(channel.name)));
+        const categoryName = getUniqueChannelName(desiredCategoryName, existingNames);
+        const created = await discordRequest('POST', `/guilds/${guildId}/channels`, {
+          name: categoryName,
+          type: 4, // GUILD_CATEGORY
+          permission_overwrites: permissionOverwrites,
+        });
+        categoryId = created.id;
+        existingChannels.push(created);
+        result.categoriesCreated.push(categoryName === desiredCategoryName ? category.name : categoryName);
+        recordBuildStep('create_category', categoryName);
+        await sleep(125);
+      } catch (err: any) {
+        recordBuildError(result, `Category "${category.name}"`, err);
+        continue; // skip channels if category failed
+      }
     }
 
     // Create channels inside the category
     for (const channel of (category.channels ?? [])) {
       try {
         const channelType = getChannelType(channel);
-        await discordRequest('POST', `/guilds/${guildId}/channels`, {
-          name: channel.name.toLowerCase().replace(/\s+/g, '-'),
+        const desiredChannelName = normalizeChannelName(channel.name);
+        const reusableChannel = existingChannels.find(item =>
+          item.type === channelType
+          && item.parent_id === categoryId
+          && normalizeName(item.name) === normalizeName(desiredChannelName)
+        );
+        if (reusableChannel) {
+          const reusedName = `${category.name}/${channel.type === 'voice' ? '' : '#'}${reusableChannel.name}`;
+          result.channelsReused.push(reusedName);
+          recordBuildStep('reuse_channel', reusedName);
+          continue;
+        }
+
+        const existingNames = new Set(existingChannels.map(item => normalizeName(item.name)));
+        const channelName = getUniqueChannelName(desiredChannelName, existingNames);
+        const created = await discordRequest('POST', `/guilds/${guildId}/channels`, {
+          name: channelName,
           type: channelType,
           parent_id: categoryId,
           permission_overwrites: permissionOverwrites,
           ...(channel.topic && channelType !== 2 ? { topic: channel.topic } : {}),
         });
-        result.channelsCreated.push(`${category.name}/${channel.type === 'voice' ? '' : '#'}${channel.name}`);
+        existingChannels.push(created);
+        const createdName = `${category.name}/${channel.type === 'voice' ? '' : '#'}${channelName}`;
+        result.channelsCreated.push(createdName);
+        recordBuildStep('create_channel', createdName);
         await sleep(125);
       } catch (err: any) {
         recordBuildError(result, `Channel "${channel.name}"`, err);
@@ -333,5 +431,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, result });
+  return NextResponse.json({ success: result.failed.length === 0, result });
 }

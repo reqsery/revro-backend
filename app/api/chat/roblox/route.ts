@@ -9,7 +9,7 @@ import {
   CREDIT_COSTS,
 } from '@/lib/credits';
 // CREDIT_COSTS is only used for IMAGE; everything else is token-based
-import { callAI, streamAI, getActualModelId } from '@/lib/codex';
+import { callAI, streamAI, selectAIModel, estimateInputTokens, getAIRoutingDebug } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -70,13 +70,45 @@ function normalizeImagePrompts(value: unknown, fallbackPrompt: string): ImagePro
     .slice(0, 3);
 }
 
+const ICON_STYLE = 'simple 2D Roblox simulator icon, flat vector-like style, thick clean outline, bright saturated colors, simple shading, centered, readable at 64x64, no text, no scene background';
+const IMAGE_PROMPT_SLOP = /\b(cinematic|epic|highly detailed|complex|realistic|crystal heart|magical fantasy scene|dramatic lighting|8k|ultra detailed)\b/gi;
+
+function isGuiIconRequest(prompt: string): boolean {
+  return /\b(icon|gui icon|ui icon|button icon|simulator icon)\b/i.test(prompt);
+}
+
+function simulatorIconPrompt(userPrompt: string): ImagePrompt {
+  if (/\brebirth\b/i.test(userPrompt)) {
+    return {
+      label: 'Rebirth icon',
+      prompt: 'Simple 2D Roblox simulator rebirth icon, two thick circular arrows around a yellow star, flat vector-like style, thick clean outline, bright colors, simple shading, centered, readable at 64x64, no text, no background.',
+    };
+  }
+
+  const subject = userPrompt
+    .replace(IMAGE_PROMPT_SLOP, '')
+    .replace(/\b(make|create|generate|draw|please|a|an|the|for|roblox|gui|ui|simulator|icon)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 90) || 'game item';
+
+  return {
+    label: 'GUI icon',
+    prompt: `Simple 2D Roblox simulator icon of ${subject}, ${ICON_STYLE}, sticker-like mobile game UI icon, transparent background if supported.`,
+  };
+}
+
 async function refineImagePrompt(
-  model: string,
   planModel: string,
   userPrompt: string
 ): Promise<{ prompts: ImagePrompt[]; cost: number }> {
+  if (isGuiIconRequest(userPrompt)) {
+    return { prompts: [simulatorIconPrompt(userPrompt)], cost: 0 };
+  }
+
+  const selection = selectAIModel(planModel, 'roblox', userPrompt);
   const result = await callAI(
-    model,
+    selection,
     `Plan Roblox image assets for this request: ${userPrompt}
 
 Return JSON only in this exact shape:
@@ -84,9 +116,11 @@ Return JSON only in this exact shape:
 
 Rules:
 - Produce 1 prompt for one deliverable, 2 prompts when the user asks for separate assets such as "icon and menu", and never more than 3 prompts.
-- Default to ordinary Roblox game art: simple, readable, playful 2D GUI assets and icons for Roblox experiences.
-- Avoid cinematic renders, sci-fi dashboards, holograms, metal frames, photoreal lighting, game screenshots, and over-detailed concept art unless the user explicitly asks for them.
-- For an icon, request a compact Roblox simulator-style icon with bold silhouette, chunky shapes, clean outline, simple shading, transparent background, and readability at small sizes.
+- Default to ordinary Roblox game assets and practical Roblox GUI pieces.
+- Keep every prompt short and production-oriented. Do not make the prompt longer than the user's request needs.
+- Never turn a GUI icon into a thumbnail, poster, scene, screenshot, or concept-art illustration.
+- Avoid cinematic, epic, highly detailed, complex, realistic, crystal heart, magical fantasy scene, dramatic lighting, 8k, ultra detailed, sci-fi dashboards, holograms, metal frames, and photoreal lighting unless the user explicitly asks for them.
+- For a GUI icon use: simple 2D Roblox simulator icon, flat/vector-like, thick clean outline, bright saturated colors, centered object, readable at 64x64, no text, no scene background, transparent background if supported, simple shading, sticker-like mobile game UI icon.
 - For a menu/panel, request a general Roblox in-game GUI panel with a clear header, bright buttons, rounded sections, simple strokes, and practical layout. A shop may use a themed custom panel background matching the shop subject.
 - Keep menus as UI assets, not placed inside a 3D Roblox world screenshot.
 - Do not put the requested icon inside a menu render unless the user explicitly asks for one combined image.
@@ -96,8 +130,11 @@ Rules:
   );
   const totalTokens = (result.usage?.input_tokens ?? 0) + (result.usage?.output_tokens ?? 0);
   return {
-    prompts: parseImagePrompts(result.content, userPrompt),
-    cost: totalTokens > 0 ? tokensToCreditCost(planModel, totalTokens) : 0.1,
+    prompts: parseImagePrompts(result.content, userPrompt).map((item) => ({
+      ...item,
+      prompt: item.prompt.replace(IMAGE_PROMPT_SLOP, '').replace(/\s+/g, ' ').trim(),
+    })),
+    cost: totalTokens > 0 ? tokensToCreditCost(selection.logicalModel, totalTokens) : 0,
   };
 }
 
@@ -235,8 +272,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
-    const planModel   = getModelForPlan(user.plan);
-    const actualModel = getActualModelId(planModel);
+    const planModel = getModelForPlan(user.plan);
+    const selection = selectAIModel(planModel, 'roblox', prompt);
 
     let history: any[] = [];
     if (conversationId) {
@@ -251,19 +288,37 @@ export async function POST(request: NextRequest) {
       if (!conversation) {
         return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
       }
+      if (conversation.type !== 'roblox') {
+        console.warn('[Roblox chat] Conversation type mismatch', {
+          conversationId,
+          conversationType: conversation.type,
+        });
+        return NextResponse.json({ error: 'Start a new Roblox chat before using this tool.' }, { status: 409 });
+      }
 
       const { data: msgs } = await supabaseAdmin
         .from('messages')
         .select('role, content')
         .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-      history = msgs ?? [];
+        .order('created_at', { ascending: false })
+        .limit(16);
+      history = (msgs ?? []).reverse();
     }
 
     // ── Image: refine ─────────────────────────────────────────────────────────
     if (type === 'image' && step === 'refine') {
-      const { prompts: refinedPrompts, cost } = await refineImagePrompt(actualModel, planModel, prompt);
-      const creditResult = await deductCredits(user.id, cost, 'image_refine', { model: planModel });
+      const { prompts: refinedPrompts, cost } = await refineImagePrompt(planModel, prompt);
+      console.info('[AI generation]', {
+        route: 'roblox_image_refine',
+        provider: isGuiIconRequest(prompt) ? 'deterministic' : selection.provider,
+        model: isGuiIconRequest(prompt) ? 'simulator_icon_template' : selection.actualModel,
+        selectedModelTier: planModel,
+        ...getAIRoutingDebug('roblox', prompt, planModel),
+        inputTokens: null,
+        outputTokens: null,
+        creditsCharged: cost,
+      });
+      const creditResult = await deductCredits(user.id, cost, 'image_refine', { model: selection.logicalModel });
       const promptSummary = refinedPrompts.map(item => `${item.label}: ${item.prompt}`).join('\n\n');
       const { convId, messageId } = await saveMessages(
         user.id,
@@ -302,6 +357,16 @@ export async function POST(request: NextRequest) {
 
       const cost = CREDIT_COSTS.IMAGE * prompts.length;
       const imageUrls = await Promise.all(prompts.map(item => generateImage(item)));
+      console.info('[AI generation]', {
+        route: 'roblox_image_generate',
+        provider: 'openai',
+        model: 'gpt-image-1.5',
+        selectedModelTier: planModel,
+        geminiConfigured: !!process.env.GEMINI_API_KEY,
+        inputTokens: null,
+        outputTokens: null,
+        creditsCharged: cost,
+      });
       const creditResult = await deductCredits(user.id, cost, 'image_generation', { model: 'gpt-image-1.5' });
       await incrementImageCount(user.id, prompts.length);
       const { convId, messageId } = await saveMessages(
@@ -350,7 +415,15 @@ export async function POST(request: NextRequest) {
         let outputTokens = 0;
 
         try {
-          const aiStream = streamAI(actualModel, prompt, 'roblox', history);
+          console.info('[AI route]', {
+            route: 'roblox_stream',
+            provider: selection.provider,
+            model: selection.actualModel,
+            selectedModelTier: planModel,
+            ...getAIRoutingDebug('roblox', prompt, planModel),
+            inputTokenEstimate: estimateInputTokens(prompt, history),
+          });
+          const aiStream = streamAI(selection, prompt, 'roblox', history);
 
           for await (const chunk of aiStream) {
             // Stop if client disconnected — don't charge
@@ -380,15 +453,27 @@ export async function POST(request: NextRequest) {
           // Calculate token-based cost
           const totalTokens = inputTokens + outputTokens;
           const tokenCost   = totalTokens > 0
-            ? tokensToCreditCost(planModel, totalTokens)
-            : 0.1; // near-zero fallback if token data somehow missing
+            ? tokensToCreditCost(selection.logicalModel, totalTokens)
+            : 0;
 
           const creditResult = await deductCredits(user.id, tokenCost, `${type}_generation`, {
-            model: planModel,
-            actualModel,
+            model: selection.logicalModel,
+            actualModel: selection.actualModel,
+            provider: selection.provider,
             input_tokens: inputTokens,
             output_tokens: outputTokens,
             total_tokens: totalTokens,
+          });
+          console.info('[AI generation]', {
+            route: 'roblox_stream',
+            provider: selection.provider,
+            model: selection.actualModel,
+            selectedModelTier: planModel,
+            ...getAIRoutingDebug('roblox', prompt, planModel),
+            inputTokenEstimate: estimateInputTokens(prompt, history),
+            inputTokens,
+            outputTokens,
+            creditsCharged: tokenCost,
           });
 
           const { convId, messageId } = await saveMessages(

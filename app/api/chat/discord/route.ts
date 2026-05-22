@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan } from '@/lib/credits';
-import { callAI, getActualModelId } from '@/lib/codex';
+import { callAI, selectAIModel, estimateInputTokens, getAIRoutingDebug } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -60,8 +60,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
-    const planModel   = getModelForPlan(user.plan)
-    const actualModel = getActualModelId(planModel)
+    const planModel = getModelForPlan(user.plan)
 
     // Fetch conversation history
     let history: any[] = []
@@ -77,13 +76,21 @@ export async function POST(request: NextRequest) {
       if (!conversation) {
         return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
       }
+      if (conversation.type !== 'discord') {
+        console.warn('[Discord chat] Conversation type mismatch', {
+          conversationId,
+          conversationType: conversation.type,
+        })
+        return NextResponse.json({ error: 'Start a new Discord chat before using this tool.' }, { status: 409 })
+      }
 
       const { data: msgs } = await supabaseAdmin
         .from('messages')
         .select('role, content')
         .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true })
-      history = msgs ?? []
+        .order('created_at', { ascending: false })
+        .limit(16)
+      history = (msgs ?? []).reverse()
     }
 
     // Prepend guild context to the prompt so the AI tailors advice to that server
@@ -91,22 +98,43 @@ export async function POST(request: NextRequest) {
       ? `[Setting up Discord server: "${guildName}" (ID: ${guildId})]\n\n${prompt}`
       : prompt
 
-    const aiResponse = await callAI(actualModel, fullPrompt, 'discord', history)
+    const selection = selectAIModel(planModel, 'discord', fullPrompt)
+    console.info('[AI route]', {
+      route: 'discord',
+      provider: selection.provider,
+      model: selection.actualModel,
+      selectedModelTier: planModel,
+      ...getAIRoutingDebug('discord', fullPrompt, planModel),
+      inputTokenEstimate: estimateInputTokens(fullPrompt, history),
+    })
+    const aiResponse = await callAI(selection, fullPrompt, 'discord', history)
 
     // Token-based billing — same model as Roblox routes, minimum 1 credit
     const totalTokens = (aiResponse.usage?.input_tokens ?? 0) + (aiResponse.usage?.output_tokens ?? 0)
-    const cost        = totalTokens > 0 ? tokensToCreditCost(planModel, totalTokens) : 1
+    const cost        = totalTokens > 0 ? tokensToCreditCost(selection.logicalModel, totalTokens) : 0
 
     const creditResult = await deductCredits(user.id, cost, 'discord_generation', {
-      model: planModel,
-      actualModel,
+      model: selection.logicalModel,
+      actualModel: selection.actualModel,
+      provider: selection.provider,
       input_tokens:  aiResponse.usage?.input_tokens,
       output_tokens: aiResponse.usage?.output_tokens,
+    })
+    console.info('[AI generation]', {
+      route: 'discord',
+      provider: selection.provider,
+      model: selection.actualModel,
+      selectedModelTier: planModel,
+      ...getAIRoutingDebug('discord', fullPrompt, planModel),
+      inputTokenEstimate: estimateInputTokens(fullPrompt, history),
+      inputTokens: aiResponse.usage?.input_tokens ?? 0,
+      outputTokens: aiResponse.usage?.output_tokens ?? 0,
+      creditsCharged: cost,
     })
 
     if (!aiResponse.content.trim()) {
       console.error('[Discord chat] Empty AI response', {
-        model: actualModel,
+        model: selection.actualModel,
         promptLength: prompt.length,
         historyLength: history.length,
       })

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { deductCredits, tokensToCreditCost, getModelForPlan } from '@/lib/credits';
-import { callAI, getActualModelId } from '@/lib/codex';
+import { callAI, selectAIModel, estimateInputTokens, getAIRoutingDebug } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -20,19 +20,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
-    const planModel   = getModelForPlan(user.plan);
-    const actualModel = getActualModelId(planModel);
-
+    const planModel = getModelForPlan(user.plan);
     const fullPrompt = `Create a Discord bot named "${botName}". ${prompt}`;
-    const aiResponse = await callAI(actualModel, fullPrompt, 'bot', []);
+    const selection = selectAIModel(planModel, 'bot', fullPrompt);
+    console.info('[AI route]', {
+      route: 'bot',
+      provider: selection.provider,
+      model: selection.actualModel,
+      selectedModelTier: planModel,
+      ...getAIRoutingDebug('bot', fullPrompt, planModel),
+      inputTokenEstimate: estimateInputTokens(fullPrompt, []),
+    });
+    const aiResponse = await callAI(selection, fullPrompt, 'bot', []);
 
     const totalTokens = (aiResponse.usage?.input_tokens ?? 0) + (aiResponse.usage?.output_tokens ?? 0);
-    const cost = totalTokens > 0 ? tokensToCreditCost(planModel, totalTokens) : 1;
+    const cost = totalTokens > 0 ? tokensToCreditCost(selection.logicalModel, totalTokens) : 0;
 
     const creditResult = await deductCredits(user.id, cost, 'bot_generation', {
-      model: planModel, actualModel,
+      model: selection.logicalModel,
+      actualModel: selection.actualModel,
+      provider: selection.provider,
       input_tokens: aiResponse.usage?.input_tokens,
       output_tokens: aiResponse.usage?.output_tokens,
+    });
+    console.info('[AI generation]', {
+      route: 'bot',
+      provider: selection.provider,
+      model: selection.actualModel,
+      selectedModelTier: planModel,
+      ...getAIRoutingDebug('bot', fullPrompt, planModel),
+      inputTokenEstimate: estimateInputTokens(fullPrompt, []),
+      inputTokens: aiResponse.usage?.input_tokens ?? 0,
+      outputTokens: aiResponse.usage?.output_tokens ?? 0,
+      creditsCharged: cost,
     });
 
     // Extract code block from response

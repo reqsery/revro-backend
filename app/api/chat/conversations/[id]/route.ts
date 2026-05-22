@@ -57,6 +57,8 @@ export async function DELETE(
   const { id } = await params;
 
   try {
+    console.info('[Conversations delete] Requested', { conversationId: id, userId: user.id });
+
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('conversations')
       .select('id')
@@ -68,22 +70,32 @@ export async function DELETE(
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
     }
 
-    const { error: messagesErr } = await supabaseAdmin
-      .from('messages')
-      .delete()
-      .eq('conversation_id', id);
-
-    if (messagesErr) throw messagesErr;
-
-    const { error } = await supabaseAdmin
+    // messages has an ON DELETE CASCADE foreign key. Delete the owned parent
+    // row and verify the database actually removed it before reporting success.
+    const { data: deleted, error } = await supabaseAdmin
       .from('conversations')
       .delete()
       .eq('id', id)
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .select('id');
 
     if (error) throw error;
+    if (!deleted?.length) {
+      console.warn('[Conversations delete] Row count', {
+        conversationId: id,
+        userId: user.id,
+        deletedRowCount: 0,
+      });
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    }
 
-    return NextResponse.json({ success: true });
+    console.info('[Conversations delete] Row count', {
+      conversationId: id,
+      userId: user.id,
+      deletedRowCount: deleted.length,
+    });
+
+    return NextResponse.json({ success: true, deleted_count: deleted.length });
   } catch (err: any) {
     console.error('[Conversations delete] Failed:', err?.message ?? 'Unknown error');
     return NextResponse.json({ error: 'Failed to delete conversation' }, { status: 500 });

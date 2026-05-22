@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { requireAuth } from '@/lib/auth';
+import { getLivePluginConnection } from '@/lib/plugin-connection';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,15 +43,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify user has an active plugin connection
-  const { data: connection } = await supabaseAdmin
-    .from('roblox_connections')
-    .select('session_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .single();
+  const connection = await getLivePluginConnection(user.id, 'task_route');
 
   if (!connection) {
+    console.warn('[Plugin/task] Rejected without live connection', {
+      userId: user.id,
+      taskType: task_type,
+    });
     return NextResponse.json(
       { error: 'No active Roblox Studio connection. Please open the Revro plugin in Studio.' },
       { status: 400 },
@@ -74,10 +73,15 @@ export async function POST(request: NextRequest) {
 
   if (dbErr || !newTask) {
     console.error('[Plugin/task] DB insert error:', dbErr?.message);
-    return NextResponse.json({ error: 'Failed to queue task' }, { status: 500 });
+    return NextResponse.json({ error: dbErr?.message || 'Failed to queue task' }, { status: 500 });
   }
 
-  console.log(`[Plugin/task] queued ${task_type} id=${newTask.id} user=${user.id}`);
+  console.info('[Plugin/task] Queued', {
+    taskType: task_type,
+    taskId: newTask.id,
+    userId: user.id,
+    sessionId: connection.session_id,
+  });
   return NextResponse.json({
     task_id: newTask.id,
     message: 'Task queued — the Revro plugin will execute it shortly.',

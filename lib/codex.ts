@@ -12,6 +12,12 @@ type AICompatibleUsage = {
   total_tokens?: number;
 };
 
+type AISelection = {
+  provider: 'openai' | 'gemini';
+  logicalModel: string;
+  actualModel: string;
+};
+
 type AICompatibleStreamEvent =
   | {
       type: 'message_start';
@@ -26,8 +32,16 @@ type AICompatibleStreamEvent =
       usage: AICompatibleUsage;
     };
 
-const MAX_OUTPUT_TOKENS = 4096;
-const DISCORD_MAX_OUTPUT_TOKENS = 8192;
+const HISTORY_WINDOW = 8;
+const OLDER_SUMMARY_WINDOW = 8;
+const OLDER_SUMMARY_CHARS = 160;
+const MAX_OUTPUT_TOKENS_BY_MODEL: Record<string, number> = {
+  'codex-mini-latest': 2048,
+  'gpt-5.1-codex': 4096,
+  'gemini-3.1-flash-lite': 1536,
+  'gemini-2.5-flash': 2048,
+  'gemini-2.5-flash-lite': 1536,
+};
 let openaiClient: OpenAI | null = null;
 
 // System prompts (you can load these from files later)
@@ -166,9 +180,18 @@ function buildInput(userMessage: string, conversationHistory: ConversationMessag
       content: normalizeContent(message.content),
     }))
     .filter((message) => message.content.trim().length > 0);
+  const recent = history.slice(-HISTORY_WINDOW);
+  const older = history.slice(-(HISTORY_WINDOW + OLDER_SUMMARY_WINDOW), -HISTORY_WINDOW);
+  const olderSummary = older
+    .map((message) => `${message.role}: ${message.content.replace(/\s+/g, ' ').slice(0, OLDER_SUMMARY_CHARS)}`)
+    .join('\n');
 
   return [
-    ...history,
+    ...(olderSummary ? [{
+      role: 'user' as const,
+      content: `[Older conversation summary]\n${olderSummary}`,
+    }] : []),
+    ...recent,
     { role: 'user' as const, content: userMessage },
   ];
 }
@@ -181,15 +204,19 @@ function normalizeUsage(usage: any): AICompatibleUsage {
   };
 }
 
-function getResponseOptions(context: RevroContext) {
+function getMaxOutputTokens(model: string): number {
+  return MAX_OUTPUT_TOKENS_BY_MODEL[model] ?? 2048;
+}
+
+function getResponseOptions(model: string, context: RevroContext) {
   if (context === 'discord') {
     return {
-      max_output_tokens: DISCORD_MAX_OUTPUT_TOKENS,
+      max_output_tokens: Math.min(getMaxOutputTokens(model), 4096),
       reasoning: { effort: 'low' as const },
     };
   }
 
-  return { max_output_tokens: MAX_OUTPUT_TOKENS };
+  return { max_output_tokens: getMaxOutputTokens(model) };
 }
 
 function getOutputText(response: any): string {
@@ -203,17 +230,25 @@ function getOutputText(response: any): string {
 }
 
 export async function* streamAI(
-  model: string,
+  selection: AISelection,
   userMessage: string,
   context: RevroContext = 'roblox',
   conversationHistory: ConversationMessage[] = []
 ): AsyncGenerator<AICompatibleStreamEvent> {
+  if (selection.provider === 'gemini') {
+    const result = await callGemini(selection.actualModel, userMessage, context, conversationHistory);
+    yield { type: 'message_start', message: { usage: { input_tokens: result.usage.input_tokens, output_tokens: 0 } } };
+    yield { type: 'content_block_delta', delta: { type: 'text_delta', text: result.content } };
+    yield { type: 'message_delta', usage: result.usage };
+    return;
+  }
+
   try {
     const stream = await getOpenAIClient().responses.create({
-      model,
+      model: selection.actualModel,
       instructions: getSystemPrompt(context),
       input: buildInput(userMessage, conversationHistory),
-      ...getResponseOptions(context),
+      ...getResponseOptions(selection.actualModel, context),
       stream: true,
       stream_options: { include_obfuscation: false },
     });
@@ -247,17 +282,21 @@ export async function* streamAI(
 }
 
 export async function callAI(
-  model: string,
+  selection: AISelection,
   userMessage: string,
   context: RevroContext = 'roblox',
   conversationHistory: ConversationMessage[] = []
 ) {
+  if (selection.provider === 'gemini') {
+    return callGemini(selection.actualModel, userMessage, context, conversationHistory);
+  }
+
   try {
     const response = await getOpenAIClient().responses.create({
-      model,
+      model: selection.actualModel,
       instructions: getSystemPrompt(context),
       input: buildInput(userMessage, conversationHistory),
-      ...getResponseOptions(context),
+      ...getResponseOptions(selection.actualModel, context),
     });
 
     const content = getOutputText(response);
@@ -265,7 +304,7 @@ export async function callAI(
       const incompleteReason = response.incomplete_details?.reason;
       console.error('OpenAI empty text output:', {
         context,
-        model,
+        model: selection.actualModel,
         status: response.status,
         incompleteReason,
         outputTypes: (response.output ?? []).map((item: any) => item?.type).filter(Boolean),
@@ -298,5 +337,84 @@ export const MODEL_IDS: Record<string, string> = {
 };
 
 export function getActualModelId(planModel: string): string {
-  return MODEL_IDS[planModel as keyof typeof MODEL_IDS] || MODEL_IDS['codex-standard'];
+  return MODEL_IDS[planModel as keyof typeof MODEL_IDS] || MODEL_IDS['codex-mini'];
+}
+
+function isAdvancedCodingTask(context: RevroContext, prompt: string): boolean {
+  if (context === 'bot') return true;
+  if (context === 'discord') return false;
+  return /\b(script|module|datastore|remoteevent|remotefunction|server|client|pathfinding|npc|combat|inventory|system|bug|debug|optimi[sz]e|refactor|lua|code)\b/i.test(prompt);
+}
+
+function isLowCostModelTier(planModel: string): boolean {
+  return planModel === 'codex-mini' || planModel === 'codex-standard';
+}
+
+function getGeminiModel(planModel: string): string {
+  if (isLowCostModelTier(planModel)) {
+    return process.env.GEMINI_LOW_TIER_MODEL || 'gemini-2.5-flash-lite';
+  }
+
+  return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+}
+
+export function selectAIModel(planModel: string, context: RevroContext, prompt: string): AISelection {
+  const geminiConfigured = !!process.env.GEMINI_API_KEY;
+  const forceGeminiForLowTier = isLowCostModelTier(planModel);
+  const useGemini = geminiConfigured && (forceGeminiForLowTier || !isAdvancedCodingTask(context, prompt));
+
+  return useGemini
+    ? { provider: 'gemini', logicalModel: 'gemini-flash', actualModel: getGeminiModel(planModel) }
+    : { provider: 'openai', logicalModel: planModel, actualModel: getActualModelId(planModel) };
+}
+
+export function getAIRoutingDebug(context: RevroContext, prompt: string, planModel?: string) {
+  return {
+    geminiConfigured: !!process.env.GEMINI_API_KEY,
+    advancedCodingTask: isAdvancedCodingTask(context, prompt),
+    forceGeminiForLowTier: planModel ? isLowCostModelTier(planModel) : undefined,
+  };
+}
+
+export function estimateInputTokens(prompt: string, history: ConversationMessage[] = []): number {
+  const chars = buildInput(prompt, history).reduce((count, item) => count + item.content.length, 0);
+  return Math.ceil(chars / 4);
+}
+
+async function callGemini(
+  model: string,
+  userMessage: string,
+  context: RevroContext,
+  conversationHistory: ConversationMessage[] = []
+) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('Gemini is not configured (GEMINI_API_KEY missing)');
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: getSystemPrompt(context) }] },
+      contents: buildInput(userMessage, conversationHistory).map((message) => ({
+        role: message.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: message.content }],
+      })),
+      generationConfig: { maxOutputTokens: getMaxOutputTokens(model), temperature: 0.4 },
+    }),
+  });
+  const data: any = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error?.message ?? `Gemini error ${response.status}`);
+  const content = (data?.candidates?.[0]?.content?.parts ?? [])
+    .map((part: any) => typeof part?.text === 'string' ? part.text : '')
+    .filter(Boolean)
+    .join('');
+  if (!content.trim()) throw new Error('Gemini returned no text output');
+  return {
+    content,
+    usage: {
+      input_tokens: data?.usageMetadata?.promptTokenCount ?? 0,
+      output_tokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
+      total_tokens: data?.usageMetadata?.totalTokenCount,
+    },
+  };
 }

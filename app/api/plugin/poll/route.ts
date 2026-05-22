@@ -25,17 +25,31 @@ export async function GET(request: NextRequest) {
   const now = new Date().toISOString();
 
   // Touch last_seen_at so the backend knows the plugin is alive
-  await supabaseAdmin
+  const { data: heartbeatRows, error: heartbeatError } = await supabaseAdmin
     .from('roblox_connections')
-    .update({ last_seen_at: now })
+    .update({ last_seen_at: now, updated_at: now })
     .eq('user_id', userId)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .select('session_id')
+    .order('last_seen_at', { ascending: false })
+    .limit(1);
 
-  // Grab the oldest pending task for this user
+  const activeSessionId = heartbeatRows?.[0]?.session_id;
+  if (heartbeatError || !activeSessionId) {
+    console.error('[Plugin/poll] Heartbeat failed', {
+      userId,
+      message: heartbeatError?.message ?? 'No active session row returned',
+    });
+    return NextResponse.json({ error: 'Failed to update plugin heartbeat' }, { status: 500 });
+  }
+  console.info('[Plugin/poll] Heartbeat updated', { userId, sessionId: activeSessionId });
+
+  // Grab the oldest pending task for this live Studio session.
   const { data: tasks, error } = await supabaseAdmin
     .from('plugin_tasks')
     .select('id, task_type, data')
     .eq('user_id', userId)
+    .eq('session_id', activeSessionId)
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
     .limit(1);
@@ -56,6 +70,13 @@ export async function GET(request: NextRequest) {
     .from('plugin_tasks')
     .update({ status: 'running', updated_at: now })
     .eq('id', task.id);
+
+  console.info('[Plugin/poll] Returning task', {
+    userId,
+    sessionId: activeSessionId,
+    taskId: task.id,
+    taskType: task.task_type,
+  });
 
   return NextResponse.json({
     task: {

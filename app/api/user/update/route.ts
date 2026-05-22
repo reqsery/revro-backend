@@ -29,6 +29,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 });
     }
 
+    console.info('[Update user] Display name saved', { userId: user.id });
+
     const planConfig = PLAN_CONFIG[updated.plan as keyof typeof PLAN_CONFIG];
 
     return NextResponse.json({

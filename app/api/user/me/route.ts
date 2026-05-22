@@ -54,5 +54,5 @@ export async function GET(request: NextRequest) {
       api_key: apiKey,
       has_password: hasPassword,
     }
-  });
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }
