@@ -24,21 +24,36 @@ export async function GET(request: NextRequest) {
 
   const now = new Date().toISOString();
 
-  // Touch last_seen_at so the backend knows the plugin is alive
-  const { data: heartbeatRows, error: heartbeatError } = await supabaseAdmin
+  const { data: activeConnections, error: activeConnectionError } = await supabaseAdmin
     .from('roblox_connections')
-    .update({ last_seen_at: now, updated_at: now })
+    .select('session_id')
     .eq('user_id', userId)
     .eq('is_active', true)
-    .select('session_id')
     .order('last_seen_at', { ascending: false })
     .limit(1);
 
-  const activeSessionId = heartbeatRows?.[0]?.session_id;
-  if (heartbeatError || !activeSessionId) {
+  const activeSessionId = activeConnections?.[0]?.session_id;
+  if (activeConnectionError || !activeSessionId) {
+    console.error('[Plugin/poll] Active session lookup failed', {
+      userId,
+      message: activeConnectionError?.message ?? 'No active session row returned',
+    });
+    return NextResponse.json({ error: 'No active plugin session' }, { status: 409 });
+  }
+
+  // Touch last_seen_at so the backend knows the plugin is alive. PostgREST
+  // rejects order/limit modifiers on this PATCH, so update the selected session.
+  const { error: heartbeatError } = await supabaseAdmin
+    .from('roblox_connections')
+    .update({ last_seen_at: now, updated_at: now })
+    .eq('user_id', userId)
+    .eq('session_id', activeSessionId)
+    .eq('is_active', true)
+
+  if (heartbeatError) {
     console.error('[Plugin/poll] Heartbeat failed', {
       userId,
-      message: heartbeatError?.message ?? 'No active session row returned',
+      message: heartbeatError.message,
     });
     return NextResponse.json({ error: 'Failed to update plugin heartbeat' }, { status: 500 });
   }
