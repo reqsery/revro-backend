@@ -42,6 +42,7 @@ export const supabaseAdmin = createClient(
       headers: {
         Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY!}`,
       },
+      fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }),
     },
   }
 );
