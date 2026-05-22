@@ -13,8 +13,22 @@ export const supabase = createClient(
   }
 );
 
+// Server-only auth client. It can adopt user auth state during password login
+// and token verification without changing the privileged table-read client.
+export const supabaseServerAuth = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
+  }
+);
+
 // Server-side admin client (bypasses RLS - use carefully!). Keep user auth
-// operations on `supabase` so this client never adopts a user's RLS context.
+// operations off this client so it never adopts a user's RLS context.
 export const supabaseAdmin = createClient(
   process.env.SUPABASE_URL!,  
   process.env.SUPABASE_SERVICE_KEY!,

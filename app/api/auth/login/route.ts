@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { supabaseAdmin, supabaseServerAuth } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Sign in with Supabase Auth
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseServerAuth.auth.signInWithPassword({
       email,
       password,
     });
