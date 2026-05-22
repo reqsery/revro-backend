@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { sendWelcomeEmail } from '@/lib/email';
 import { fireResendEvent } from '@/lib/resend';
+import { hashPluginApiKey } from '@/lib/plugin-auth';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -88,6 +89,7 @@ export async function POST(request: NextRequest) {
       .insert({
         user_id: userId,
         key: apiKey,
+        key_hash: hashPluginApiKey(apiKey),
         name: 'Default API Key'
       });
 

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { supabaseAdmin } from './supabase';
+import { createHash } from 'crypto';
 
 export function getPluginApiKey(request: NextRequest): string {
   const headerKey = request.headers.get('x-api-key')?.trim();
@@ -13,11 +14,15 @@ export function getPluginApiKey(request: NextRequest): string {
   return '';
 }
 
+export function hashPluginApiKey(apiKey: string): string {
+  return createHash('sha256').update(apiKey, 'utf8').digest('hex');
+}
+
 export async function getUserIdByPluginApiKey(apiKey: string): Promise<string | null> {
   const { data, error } = await supabaseAdmin
     .from('api_keys')
     .select('user_id')
-    .eq('key', apiKey)
+    .eq('key_hash', hashPluginApiKey(apiKey))
     .single();
 
   if (error || !data) return null;

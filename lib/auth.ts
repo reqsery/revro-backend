@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin, supabaseServerAuth } from '@/lib/supabase';
 import { sendWelcomeEmail } from '@/lib/email';
 import { fireResendEvent } from '@/lib/resend';
+import { hashPluginApiKey } from '@/lib/plugin-auth';
 import crypto from 'crypto';
 
 function generateApiKey(): string {
@@ -85,7 +86,7 @@ export async function getUser(request: NextRequest) {
 
     const { error: apiKeyErr } = await supabaseAdmin
       .from('api_keys')
-      .insert({ user_id: user.id, key: apiKey, name: 'Default API Key' })
+      .insert({ user_id: user.id, key: apiKey, key_hash: hashPluginApiKey(apiKey), name: 'Default API Key' })
     if (apiKeyErr) console.error('[Auth] API key insert failed:', apiKeyErr)
 
     // Fire welcome email + Resend event — never block the request

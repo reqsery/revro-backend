@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
+import { hashPluginApiKey } from '@/lib/plugin-auth';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
 
   const { data: inserted, error } = await supabaseAdmin
     .from('api_keys')
-    .insert({ user_id: user.id, name, key })
+    .insert({ user_id: user.id, name, key, key_hash: hashPluginApiKey(key) })
     .select('id')
     .single();
 

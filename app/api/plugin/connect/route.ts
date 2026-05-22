@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
   const userId = await getUserIdByPluginApiKey(apiKey);
   if (!userId) {
-    console.warn(`[Plugin/connect] Key not found (prefix: ${apiKey.slice(0, 8)})`);
+    console.warn('[Plugin/connect] Key not found');
     return NextResponse.json({ error: 'Invalid API key — copy the current key from revro.dev/dashboard/settings?tab=setup' }, { status: 401 });
   }
 
