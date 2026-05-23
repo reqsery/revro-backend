@@ -15,9 +15,13 @@ Plan entitlement and usage balance are separate:
 - `extra_wallet_balance` is purchased top-up balance and does not expire.
 - `wallet_spent` tracks lifetime wallet usage.
 - `billing_cycle_end` controls the next included-wallet reset.
+- Whop membership identity (`whop_user_id`, `whop_membership_id`,
+  `whop_product_id`, `whop_plan_id`) links purchases to the Revro user record.
 
 Wallet money must never upgrade a user's plan. Manual/admin balance edits only
-change spend capacity, not entitlement.
+change spend capacity, not entitlement. Whop webhooks must resolve a signed
+checkout session or existing Whop membership link before applying a plan; raw
+purchase email is not enough to assign entitlement.
 
 ## Plans
 
@@ -63,9 +67,10 @@ Do not commit secret values.
 
 ## Database
 
-Apply `ai-wallet-migration.sql` before deploying wallet-aware API changes. The
-legacy credit columns may remain for compatibility, but they are no longer the
-source of truth for billing.
+Apply `ai-wallet-migration.sql` and `whop_identity_linking_migration.sql`
+before deploying wallet-aware billing changes. The legacy credit columns may
+remain for compatibility, but they are no longer the source of truth for
+billing.
 
 Important tables:
 
@@ -76,6 +81,8 @@ Important tables:
 | `conversations` | Chat conversation metadata |
 | `messages` | Chat messages |
 | `usage_log` | Provider/model/token/cost analytics and wallet deductions |
+| `whop_entitlements` | Linked or claimable Whop memberships/top-ups |
+| `whop_checkout_sessions` | Signed checkout sessions that bind Whop purchases to `revro_user_id` |
 | `roblox_connections` | Active Studio plugin sessions |
 | `roblox_tasks` | Queued Studio plugin work |
 | `discord_connections` | Discord user/bot connection data |
