@@ -224,7 +224,7 @@ async function downgradeToFree(user: ResolvedUser, membership: WhopMembership): 
   const { error } = await supabaseAdmin.from('users').update({
     plan: 'free',
     plan_source: 'whop_cancelled',
-    monthly_wallet_balance: 0,
+    monthly_wallet_balance: PLAN_CONFIG.free.wallet_monthly_usd,
     images_generated: 0,
     billing_cycle_start: now,
     billing_cycle_end: null,

@@ -105,13 +105,15 @@ async function downgradeToFree(userId: string): Promise<void> {
   const { error } = await supabaseAdmin
     .from('users')
     .update({
-      plan:                 'free',
-      credits_total:        PLAN_CONFIG.free.credits,
-      credits_used:         0,
-      images_generated:     0,
-      billing_cycle_start:  new Date().toISOString(),
-      updated_at:           new Date().toISOString(),
-    })
+        plan:                 'free',
+        credits_total:        PLAN_CONFIG.free.credits,
+        credits_used:         0,
+        monthly_wallet_balance: PLAN_CONFIG.free.wallet_monthly_usd,
+        images_generated:     0,
+        billing_cycle_start:  new Date().toISOString(),
+        billing_cycle_end:    null,
+        updated_at:           new Date().toISOString(),
+      })
     .eq('id', userId);
 
   if (error) throw new Error(`DB update failed: ${error.message}`);
