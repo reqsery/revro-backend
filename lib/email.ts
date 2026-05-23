@@ -1,4 +1,4 @@
-import { Resend } from 'resend';
+﻿import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -35,7 +35,7 @@ const WELCOME_EMAIL_HTML = (userName: string, apiKey: string) => `
       <li>AI-powered script generation</li>
       <li>Roblox Studio plugin integration</li>
       <li>Discord bot setup tools</li>
-      <li>Monthly credits for generations</li>
+      <li>AI Wallet usage balance for generations</li>
     </ul>
     
     <p style="margin-top: 30px;">
@@ -235,17 +235,17 @@ export async function sendLowCreditsEmail(
       </head>
       <body>
         <div class="container">
-          <h1>Running Low on Credits</h1>
+          <h1>Running Low on AI Wallet</h1>
           <p>Hi ${userName},</p>
-          <p>You have <strong>${creditsRemaining} out of ${creditsTotal} credits</strong> remaining this month.</p>
-          <p>Your credits will reset on <strong>${resetDate}</strong>.</p>
+          <p>You have <strong>$${Number(creditsRemaining).toFixed(2)} out of $${Number(creditsTotal).toFixed(2)} AI Wallet</strong> remaining this cycle.</p>
+          <p>Your included wallet balance will reset on <strong>${resetDate}</strong>.</p>
           <p>In the meantime, you can:</p>
           <ul>
-            <li>Purchase additional credits</li>
-            <li>Upgrade your plan for more monthly credits</li>
+            <li>Purchase an AI Wallet top-up</li>
+            <li>Upgrade your plan for more included wallet balance</li>
           </ul>
           <p style="margin-top: 30px;">
-            <a href="https://revro.dev/billing" class="button">Manage Credits</a>
+            <a href="https://revro.dev/dashboard/settings?tab=billing" class="button">Manage AI Wallet</a>
           </p>
           <p class="footer">The Revro Team</p>
         </div>
@@ -256,19 +256,19 @@ export async function sendLowCreditsEmail(
     const { data, error } = await resend.emails.send({
       from: 'Revro <noreply@revro.dev>',
       to: email,
-      subject: 'Running low on Revro credits',
+      subject: 'Running low on Revro AI Wallet',
       html,
     });
 
     if (error) {
-      console.error('Failed to send low credits email:', error);
+      console.error('Failed to send low wallet email:', error);
       return { success: false, error: error.message };
     }
 
-    console.log('Low credits email sent:', data);
+    console.log('Low wallet email sent:', data);
     return { success: true };
   } catch (error) {
-    console.error('Error sending low credits email:', error);
+    console.error('Error sending low wallet email:', error);
     return { success: false, error: 'Failed to send email' };
   }
 }
@@ -313,8 +313,8 @@ export async function sendMonthlyUsageEmail(
                <strong>${imagesGenerated}</strong> images generated</p>
             <p class="stats-label">Discord</p>
             <p><strong>${discordServersSetup}</strong> servers configured</p>
-            <p class="stats-label">Credits</p>
-            <p><strong>${creditsUsed} / ${creditsTotal}</strong> used this month<br>
+            <p class="stats-label">AI Wallet</p>
+            <p><strong>$${Number(creditsUsed).toFixed(2)} / $${Number(creditsTotal).toFixed(2)}</strong> used this month<br>
                <strong>Plan:</strong> ${plan}</p>
           </div>
           <p style="margin-top: 30px;">
@@ -399,7 +399,7 @@ export async function sendPaymentConfirmationEmail(
     const { data, error } = await resend.emails.send({
       from: 'Revro <noreply@revro.dev>',
       to: email,
-      subject: `Payment confirmed — ${plan} plan`,
+      subject: `Payment confirmed â€” ${plan} plan`,
       html,
     });
 
@@ -546,7 +546,7 @@ export async function sendDeletionCancelledEmail(
         <div class="container">
           <h1>Account Deletion Cancelled</h1>
           <p>Hi ${userName},</p>
-          <p>Great news — your account deletion has been successfully cancelled. Your Revro account and all your data are safe.</p>
+          <p>Great news â€” your account deletion has been successfully cancelled. Your Revro account and all your data are safe.</p>
           <div class="success">
             Your account is fully active and nothing has been deleted.
           </div>
@@ -608,14 +608,14 @@ export async function sendCreatePasswordEmail(
           <!-- Button -->
           <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
             <tr><td style="background:#7c3aed;border-radius:10px;">
-              <a href="${setPasswordUrl}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:-0.2px;">Create Password →</a>
+              <a href="${setPasswordUrl}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;letter-spacing:-0.2px;">Create Password â†’</a>
             </td></tr>
           </table>
 
           <!-- Note -->
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr><td style="background:#1c1917;border-left:3px solid #7c3aed;border-radius:4px;padding:12px 16px;">
-              <p style="margin:0;font-size:13px;color:#d4d4d8;">⏱ This link expires in <strong style="color:#ffffff;">15 minutes</strong> and can only be used once.</p>
+              <p style="margin:0;font-size:13px;color:#d4d4d8;">â± This link expires in <strong style="color:#ffffff;">15 minutes</strong> and can only be used once.</p>
             </td></tr>
           </table>
 
@@ -624,7 +624,7 @@ export async function sendCreatePasswordEmail(
         <!-- Footer -->
         <tr><td style="padding-top:24px;text-align:center;">
           <p style="margin:0;font-size:12px;color:#52525b;">
-            If you didn't request this, ignore this email — your account is safe.<br>
+            If you didn't request this, ignore this email â€” your account is safe.<br>
             <span style="color:#3f3f46;">The Revro Team</span>
           </p>
         </td></tr>
@@ -676,9 +676,9 @@ export async function sendSubscriptionCancelledEmail(
           <p>Your <strong>${plan}</strong> subscription has been cancelled. You'll continue to have access until <strong>${accessUntil}</strong>, after which your account reverts to the Free plan.</p>
           <div class="info-box">
             <strong>What happens next:</strong><br>
-            — Credits reset to 25/month (Free plan)<br>
-            — AI model reverts to Standard AI<br>
-            — Image generation no longer available
+            - Included AI Wallet resets to the Free balance<br>
+            â€” AI model reverts to Standard AI<br>
+            â€” Image generation no longer available
           </div>
           <p>Changed your mind? You can resubscribe at any time.</p>
           <p style="margin-top: 30px;">
@@ -709,3 +709,4 @@ export async function sendSubscriptionCancelledEmail(
     return { success: false, error: 'Failed to send email' };
   }
 }
+

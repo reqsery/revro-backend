@@ -189,6 +189,8 @@ export async function deductCredits(
     model: metadata?.actualModel ?? metadata?.model ?? null,
     inputTokens: metadata?.input_tokens ?? null,
     outputTokens: metadata?.output_tokens ?? null,
+    imageCost: metadata?.image_cost ?? null,
+    fileContextCost: metadata?.file_context_cost ?? null,
     estimatedRealUsdCost: usageMetadata.estimated_real_usd_cost,
     deductedWalletAmount: walletCost,
     walletRemaining: remaining,

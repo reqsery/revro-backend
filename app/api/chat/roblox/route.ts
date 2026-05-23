@@ -319,6 +319,8 @@ export async function POST(request: NextRequest) {
         ...getAIRoutingDebug('roblox', prompt, planModel),
         inputTokens: null,
         outputTokens: null,
+        imageCost: null,
+        fileContextCost: null,
         estimatedRealUsdCost: cost,
         deductedWalletAmount: cost,
         userId: user.id,
@@ -327,6 +329,8 @@ export async function POST(request: NextRequest) {
         model: selection.logicalModel,
         actualModel: selection.actualModel,
         provider: selection.provider,
+        image_cost: null,
+        file_context_cost: null,
         estimated_real_usd_cost: cost,
       });
       const promptSummary = refinedPrompts.map(item => `${item.label}: ${item.prompt}`).join('\n\n');
@@ -375,6 +379,8 @@ export async function POST(request: NextRequest) {
         geminiConfigured: !!process.env.GEMINI_API_KEY,
         inputTokens: null,
         outputTokens: null,
+        imageCost: cost,
+        fileContextCost: null,
         estimatedRealUsdCost: cost,
         deductedWalletAmount: cost,
         userId: user.id,
@@ -383,6 +389,8 @@ export async function POST(request: NextRequest) {
         model: 'gpt-image-1.5',
         actualModel: 'gpt-image-1.5',
         provider: 'openai',
+        image_cost: cost,
+        file_context_cost: null,
         estimated_real_usd_cost: cost,
       });
       await incrementImageCount(user.id, prompts.length);
@@ -479,6 +487,8 @@ export async function POST(request: NextRequest) {
             input_tokens: inputTokens,
             output_tokens: outputTokens,
             total_tokens: totalTokens,
+            image_cost: null,
+            file_context_cost: null,
             estimated_real_usd_cost: tokenCost,
           });
           console.info('[AI generation]', {
@@ -490,6 +500,8 @@ export async function POST(request: NextRequest) {
             inputTokenEstimate: estimateInputTokens(prompt, history),
             inputTokens,
             outputTokens,
+            imageCost: null,
+            fileContextCost: null,
             estimatedRealUsdCost: tokenCost,
             deductedWalletAmount: tokenCost,
             userId: user.id,

@@ -122,6 +122,8 @@ export async function POST(request: NextRequest) {
       provider: selection.provider,
       input_tokens:  aiResponse.usage?.input_tokens,
       output_tokens: aiResponse.usage?.output_tokens,
+      image_cost: null,
+      file_context_cost: null,
       estimated_real_usd_cost: cost,
     })
     console.info('[AI generation]', {
@@ -133,6 +135,8 @@ export async function POST(request: NextRequest) {
       inputTokenEstimate: estimateInputTokens(fullPrompt, history),
       inputTokens: aiResponse.usage?.input_tokens ?? 0,
       outputTokens: aiResponse.usage?.output_tokens ?? 0,
+      imageCost: null,
+      fileContextCost: null,
       estimatedRealUsdCost: cost,
       deductedWalletAmount: cost,
       userId: user.id,
