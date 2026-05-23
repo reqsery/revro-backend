@@ -390,31 +390,53 @@ async function callGemini(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('Gemini is not configured (GEMINI_API_KEY missing)');
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: getSystemPrompt(context) }] },
-      contents: buildInput(userMessage, conversationHistory).map((message) => ({
-        role: message.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: message.content }],
-      })),
-      generationConfig: { maxOutputTokens: getMaxOutputTokens(model), temperature: 0.4 },
-    }),
-  });
-  const data: any = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error?.message ?? `Gemini error ${response.status}`);
-  const content = (data?.candidates?.[0]?.content?.parts ?? [])
-    .map((part: any) => typeof part?.text === 'string' ? part.text : '')
-    .filter(Boolean)
-    .join('');
-  if (!content.trim()) throw new Error('Gemini returned no text output');
-  return {
-    content,
-    usage: {
-      input_tokens: data?.usageMetadata?.promptTokenCount ?? 0,
-      output_tokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
-      total_tokens: data?.usageMetadata?.totalTokenCount,
-    },
-  };
+  const fallbackModels = [
+    model,
+    process.env.GEMINI_FALLBACK_MODEL,
+    model === 'gemini-2.5-flash' ? 'gemini-2.5-flash-lite' : 'gemini-2.5-flash',
+  ].filter((item, index, arr): item is string => !!item && arr.indexOf(item) === index);
+
+  let lastError = '';
+  for (const candidateModel of fallbackModels) {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: getSystemPrompt(context) }] },
+        contents: buildInput(userMessage, conversationHistory).map((message) => ({
+          role: message.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: message.content }],
+        })),
+        generationConfig: { maxOutputTokens: getMaxOutputTokens(candidateModel), temperature: 0.4 },
+      }),
+    });
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      lastError = data?.error?.message ?? `Gemini error ${response.status}`;
+      const retryable = response.status === 429 || response.status >= 500 || /demand|overload|temporar/i.test(lastError);
+      if (retryable && candidateModel !== fallbackModels[fallbackModels.length - 1]) {
+        console.warn('[Gemini] Retrying with fallback model', {
+          from: candidateModel,
+          to: fallbackModels[fallbackModels.indexOf(candidateModel) + 1],
+          status: response.status,
+        });
+        continue;
+      }
+      throw new Error(lastError);
+    }
+    const content = (data?.candidates?.[0]?.content?.parts ?? [])
+      .map((part: any) => typeof part?.text === 'string' ? part.text : '')
+      .filter(Boolean)
+      .join('');
+    if (!content.trim()) throw new Error('Gemini returned no text output');
+    return {
+      content,
+      usage: {
+        input_tokens: data?.usageMetadata?.promptTokenCount ?? 0,
+        output_tokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
+        total_tokens: data?.usageMetadata?.totalTokenCount,
+      },
+    };
+  }
+  throw new Error(lastError || 'Gemini generation failed');
 }
