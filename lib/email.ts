@@ -677,7 +677,7 @@ export async function sendSubscriptionCancelledEmail(
           <div class="info-box">
             <strong>What happens next:</strong><br>
             - Included AI Wallet resets to the Free balance<br>
-            â€” AI model reverts to Standard AI<br>
+            â€” AI model reverts to Standard<br>
             â€” Image generation no longer available
           </div>
           <p>Changed your mind? You can resubscribe at any time.</p>

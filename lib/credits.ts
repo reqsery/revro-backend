@@ -55,7 +55,7 @@ export const PLAN_CONFIG = {
     wallet_annual_usd: 0.5,
     images_max: 0,
     model: 'codex-mini',
-    display_name: 'Basic AI',
+    display_name: 'Fast',
   },
   pro: {
     credits: 500,
@@ -63,7 +63,7 @@ export const PLAN_CONFIG = {
     wallet_annual_usd: 120,
     images_max: 50,
     model: 'codex-standard',
-    display_name: 'Standard AI',
+    display_name: 'Standard',
   },
   dev: {
     credits: 150,
@@ -71,15 +71,15 @@ export const PLAN_CONFIG = {
     wallet_annual_usd: 360,
     images_max: 100,
     model: 'codex-premium',
-    display_name: 'Premium AI',
+    display_name: 'Pro',
   },
   studio: {
     credits: 1500,
     wallet_monthly_usd: 85,
     wallet_annual_usd: 1020,
     images_max: 150,
-    model: 'codex-premium',
-    display_name: 'Premium AI',
+    model: 'codex-max',
+    display_name: 'Pro Max',
   },
   // Existing memberships can carry the pre-wallet key until Whop renews them.
   starter: {
@@ -88,7 +88,7 @@ export const PLAN_CONFIG = {
     wallet_annual_usd: 360,
     images_max: 100,
     model: 'codex-premium',
-    display_name: 'Premium AI',
+    display_name: 'Pro',
   },
 };
 

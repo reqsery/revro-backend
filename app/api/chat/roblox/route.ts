@@ -70,8 +70,8 @@ function normalizeImagePrompts(value: unknown, fallbackPrompt: string): ImagePro
     .slice(0, 3);
 }
 
-const ICON_STYLE = 'simple 2D Roblox simulator icon, flat vector-like style, thick clean outline, bright saturated colors, simple shading, centered, readable at 64x64, no text, no scene background';
-const IMAGE_PROMPT_SLOP = /\b(cinematic|epic|highly detailed|complex|realistic|crystal heart|magical fantasy scene|dramatic lighting|8k|ultra detailed)\b/gi;
+const ICON_STYLE = 'Roblox simulator UI icon, mobile-game UI style, thick chunky shapes, clear silhouette, bold outline, simple cartoon shading, high contrast, centered composition, minimal details, readable at 64x64, no text, transparent background if supported';
+const IMAGE_PROMPT_SLOP = /\b(cinematic|epic|highly detailed|complex|realistic|crystal heart|magical fantasy scene|dramatic lighting|8k|ultra detailed|concept art|photoreal|photorealistic)\b/gi;
 
 function isGuiIconRequest(prompt: string): boolean {
   return /\b(icon|gui icon|ui icon|button icon|simulator icon)\b/i.test(prompt);
@@ -81,7 +81,7 @@ function simulatorIconPrompt(userPrompt: string): ImagePrompt {
   if (/\brebirth\b/i.test(userPrompt)) {
     return {
       label: 'Rebirth icon',
-      prompt: 'Simple 2D Roblox simulator rebirth icon, two thick circular arrows around a yellow star, flat vector-like style, thick clean outline, bright colors, simple shading, centered, readable at 64x64, no text, no background.',
+      prompt: 'Roblox simulator rebirth button icon, mobile-game UI style, thick chunky shapes, extremely clear silhouette, two bold golden circular arrows spinning around a bright yellow star, simple cartoon shading, high contrast, centered composition, minimal details, readable at 64x64, polished Roblox simulator art style, clean edges, no text, transparent background, not realistic, not cinematic, not detailed concept art.',
     };
   }
 
@@ -94,7 +94,7 @@ function simulatorIconPrompt(userPrompt: string): ImagePrompt {
 
   return {
     label: 'GUI icon',
-    prompt: `Simple 2D Roblox simulator icon of ${subject}, ${ICON_STYLE}, sticker-like mobile game UI icon, transparent background if supported.`,
+    prompt: `${ICON_STYLE}, ${subject}.`,
   };
 }
 
@@ -119,8 +119,8 @@ Rules:
 - Default to ordinary Roblox game assets and practical Roblox GUI pieces.
 - Keep every prompt short and production-oriented. Do not make the prompt longer than the user's request needs.
 - Never turn a GUI icon into a thumbnail, poster, scene, screenshot, or concept-art illustration.
-- Avoid cinematic, epic, highly detailed, complex, realistic, crystal heart, magical fantasy scene, dramatic lighting, 8k, ultra detailed, sci-fi dashboards, holograms, metal frames, and photoreal lighting unless the user explicitly asks for them.
-- For a GUI icon use: simple 2D Roblox simulator icon, flat/vector-like, thick clean outline, bright saturated colors, centered object, readable at 64x64, no text, no scene background, transparent background if supported, simple shading, sticker-like mobile game UI icon.
+- Avoid cinematic, epic, highly detailed, complex, realistic, crystal heart, magical fantasy scene, dramatic lighting, 8k, ultra detailed, concept art, sci-fi dashboards, holograms, metal frames, and photoreal lighting unless the user explicitly asks for them.
+- For a GUI icon use: Roblox simulator UI icon, mobile-game UI style, thick chunky shapes, clear silhouette, bold outline, simple cartoon shading, high contrast, centered composition, minimal details, readable at 64x64, no text, transparent background if supported.
 - For a menu/panel, request a general Roblox in-game GUI panel with a clear header, bright buttons, rounded sections, simple strokes, and practical layout. A shop may use a themed custom panel background matching the shop subject.
 - Keep menus as UI assets, not placed inside a 3D Roblox world screenshot.
 - Do not put the requested icon inside a menu render unless the user explicitly asks for one combined image.

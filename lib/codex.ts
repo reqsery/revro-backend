@@ -56,6 +56,10 @@ Key guidelines:
 - When creating UI, use modern UICorner, UIStroke, and proper scaling
 - Explain your code briefly after generating it
 - If generating a full system, break it into organized modules
+- For systems such as rebirth, shop, simulator mechanics, inventory, quests, or currency, generate Studio-ready structure instead of tiny snippets
+- Label each Lua/Luau code block with its intended target service and script type, such as ServerScriptService Script, StarterGui LocalScript, ReplicatedStorage ModuleScript, and ReplicatedStorage RemoteEvent
+- Include needed folders, RemoteEvents, ModuleScripts, server scripts, client scripts, and UI wiring so Revro can insert the pieces through the Studio plugin
+- Keep each code block focused on one Studio object and name it clearly
 
 When the user asks to create something, generate the complete, working code ready to be inserted into Roblox Studio.`;
 
@@ -334,6 +338,7 @@ export const MODEL_IDS: Record<string, string> = {
   'codex-standard': 'gpt-5.1-codex',
   'codex-advanced': 'gpt-5.1-codex',
   'codex-premium': 'gpt-5.1-codex',
+  'codex-max': 'gpt-5.1-codex',
 };
 
 export function getActualModelId(planModel: string): string {
