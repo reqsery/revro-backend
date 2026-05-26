@@ -648,6 +648,34 @@ export async function sendCreatePasswordEmail(
   }
 }
 
+export async function sendWhopPurchaseReadyEmail(
+  email: string,
+  planOrTopup: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || 'Revro <noreply@revro.dev>',
+      to: email,
+      subject: 'Your Revro purchase is ready',
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1d1c1d;max-width:560px;margin:0 auto;padding:32px 20px;">
+          <h1 style="font-size:28px;margin:0 0 16px;">Your Revro purchase is ready</h1>
+          <p>We received your Whop purchase for <strong>${planOrTopup}</strong>.</p>
+          <p>Create a Revro account or sign in using this same email address and your purchase will activate automatically.</p>
+          <p style="margin:28px 0;">
+            <a href="https://revro.dev/signup" style="background:#2563eb;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Open Revro</a>
+          </p>
+          <p style="color:#64748b;font-size:13px;">Used a different Revro email? Contact support@revro.dev and we can transfer it safely.</p>
+        </div>
+      `,
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to send email' };
+  }
+}
+
 export async function sendSubscriptionCancelledEmail(
   email: string,
   userName: string,

@@ -15,6 +15,7 @@ create table if not exists public.whop_entitlements (
   whop_membership_id text,
   whop_product_id text,
   whop_plan_id text,
+  buyer_email text,
   plan text,
   interval text,
   wallet_topup_amount numeric(12,6),
@@ -31,6 +32,9 @@ create unique index if not exists whop_entitlements_membership_unique
   where whop_membership_id is not null;
 create index if not exists whop_entitlements_revro_user_idx on public.whop_entitlements(revro_user_id);
 create index if not exists whop_entitlements_whop_user_idx on public.whop_entitlements(whop_user_id);
+create index if not exists whop_entitlements_buyer_email_pending_idx
+  on public.whop_entitlements(buyer_email)
+  where revro_user_id is null and buyer_email is not null;
 
 create table if not exists public.whop_checkout_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -71,4 +75,3 @@ comment on table public.whop_entitlements is
   'Whop membership/product records linked to Revro users. Unlinked records are claim/relink candidates and must not be matched by email.';
 comment on table public.whop_checkout_sessions is
   'Signed Revro checkout sessions used to bind Whop webhooks to revro_user_id.';
-

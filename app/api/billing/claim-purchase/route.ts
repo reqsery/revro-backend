@@ -6,6 +6,14 @@ import { type BillingInterval, type PlanKey } from '@/lib/whop-products';
 
 export const dynamic = 'force-dynamic';
 
+function isSupportUser(email: string | null | undefined): boolean {
+  const allowlist = (process.env.REVRO_SUPPORT_EMAILS || process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((item) => item.toLowerCase().trim())
+    .filter(Boolean);
+  return Boolean(email && allowlist.includes(email.toLowerCase().trim()));
+}
+
 function getCycleEnd(interval: BillingInterval): string {
   const end = new Date();
   end.setUTCMonth(end.getUTCMonth() + (interval === 'annual' ? 12 : 1));
@@ -28,6 +36,14 @@ function canClaimEntitlement(entitlement: any): boolean {
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
+
+  if (!isSupportUser(user.email)) {
+    console.warn('[Whop/claim] Rejected non-support claim attempt', { userId: user.id });
+    return NextResponse.json(
+      { error: 'Purchases are linked automatically by checkout email. Contact support to transfer a purchase.' },
+      { status: 403 },
+    );
+  }
 
   const body = await request.json().catch(() => ({}));
   const membershipId = String(body.whop_membership_id ?? '').trim();

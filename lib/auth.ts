@@ -4,6 +4,7 @@ import { sendWelcomeEmail } from '@/lib/email';
 import { fireResendEvent } from '@/lib/resend';
 import { hashPluginApiKey } from '@/lib/plugin-auth';
 import { PLAN_CONFIG } from '@/lib/credits';
+import { attachPendingWhopEntitlementsForUser } from '@/lib/whop-entitlements';
 import crypto from 'crypto';
 
 function generateApiKey(): string {
@@ -43,6 +44,15 @@ export async function getUser(request: NextRequest) {
             .eq('id', user.id);
         } catch {}
         return { ...userData, deletion_scheduled_at: null, deletion_date: null };
+      }
+      const attached = await attachPendingWhopEntitlementsForUser(userData.id, userData.email);
+      if (attached > 0) {
+        const { data: refreshed } = await supabaseAdmin
+          .from('users')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        return refreshed ?? userData;
       }
       return userData;
     }
@@ -99,6 +109,13 @@ export async function getUser(request: NextRequest) {
     void fireResendEvent('user.signed_up', email, displayName, { first_name: displayName })
 
     console.log(`[Auth] Auto-provisioned OAuth user: ${email}`)
+
+    await attachPendingWhopEntitlementsForUser(user.id, email).catch((err) => {
+      console.warn('[Auth] Pending Whop entitlement attach failed', {
+        userId: user.id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     const { data: newUser } = await supabaseAdmin
       .from('users').select('*').eq('id', user.id).single()

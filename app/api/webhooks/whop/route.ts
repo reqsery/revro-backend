@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { PLAN_CONFIG } from '@/lib/credits';
-import { sendPaymentFailedEmail, sendPaymentConfirmationEmail, sendSubscriptionCancelledEmail } from '@/lib/email';
+import { sendPaymentFailedEmail, sendPaymentConfirmationEmail, sendSubscriptionCancelledEmail, sendWhopPurchaseReadyEmail } from '@/lib/email';
 import { extractWhopMetadata, hashCheckoutToken, verifyCheckoutToken } from '@/lib/whop-linking';
 import { productPlan, topupAmount, type ProductPlan } from '@/lib/whop-products';
 import crypto from 'crypto';
@@ -34,7 +34,7 @@ type ResolvedUser = {
   email: string;
   plan: string;
   extra_wallet_balance: unknown;
-  source: 'metadata' | 'existing_link';
+  source: 'metadata' | 'existing_link' | 'buyer_email';
 };
 
 function verifySignature(rawBody: string, signature: string, secret: string): boolean {
@@ -80,6 +80,10 @@ function safePayloadForStorage(payload: WhopWebhookPayload): Record<string, unkn
   };
 }
 
+function buyerEmailFor(membership: WhopMembership): string {
+  return membership.user?.email?.toLowerCase().trim() ?? '';
+}
+
 async function findUserById(userId: string): Promise<ResolvedUser | null> {
   const { data, error } = await supabaseAdmin
     .from('users')
@@ -118,10 +122,22 @@ async function findUserByExistingLink(membership: WhopMembership): Promise<Resol
   return user ? { ...user, source: 'existing_link' } : null;
 }
 
+async function findUserByBuyerEmail(email: string): Promise<ResolvedUser | null> {
+  const buyerEmail = email.toLowerCase().trim();
+  if (!buyerEmail) return null;
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('id, email, plan, extra_wallet_balance')
+    .eq('email', buyerEmail)
+    .maybeSingle();
+  return error || !data ? null : { ...data, source: 'buyer_email' };
+}
+
 async function resolveUser(payload: WhopWebhookPayload, membership: WhopMembership): Promise<ResolvedUser | null> {
   const metadata = extractWhopMetadata(payload);
   const rawToken = typeof metadata.revro_checkout_token === 'string' ? metadata.revro_checkout_token : '';
   const tokenPayload = rawToken ? verifyCheckoutToken(rawToken) : null;
+  const hasCheckoutMetadata = Boolean(rawToken || metadata.revro_user_id);
 
   if (tokenPayload?.revro_user_id) {
     const tokenHash = hashCheckoutToken(rawToken);
@@ -152,7 +168,16 @@ async function resolveUser(payload: WhopWebhookPayload, membership: WhopMembersh
     });
   }
 
-  return findUserByExistingLink(membership);
+  const linkedUser = await findUserByExistingLink(membership);
+  if (linkedUser) return linkedUser;
+
+  // Direct Whop storefront purchases do not have Revro checkout metadata.
+  // In that case only, use buyer email as a practical fallback.
+  if (!hasCheckoutMetadata) {
+    return findUserByBuyerEmail(buyerEmailFor(membership));
+  }
+
+  return null;
 }
 
 async function upsertWhopEntitlement(args: {
@@ -163,14 +188,16 @@ async function upsertWhopEntitlement(args: {
   topup?: number | null;
   status: string;
   source: string;
+  buyerEmail?: string | null;
 }): Promise<void> {
   const membershipId = args.membership.id ?? null;
-  const patch = {
+  const patch: Record<string, unknown> = {
     revro_user_id: args.revroUserId,
     whop_user_id: args.membership.user?.id ?? null,
     whop_membership_id: membershipId,
     whop_product_id: args.membership.product_id ?? null,
     whop_plan_id: args.membership.plan_id ?? null,
+    buyer_email: args.buyerEmail?.toLowerCase().trim() || null,
     plan: args.plan?.plan ?? null,
     interval: args.plan?.interval ?? null,
     wallet_topup_amount: args.topup ?? null,
@@ -181,22 +208,29 @@ async function upsertWhopEntitlement(args: {
     updated_at: new Date().toISOString(),
   };
 
-  if (membershipId) {
-    const { data: existing } = await supabaseAdmin
-      .from('whop_entitlements')
-      .select('id')
-      .eq('whop_membership_id', membershipId)
-      .maybeSingle();
-    const query = existing?.id
-      ? supabaseAdmin.from('whop_entitlements').update(patch).eq('id', existing.id)
-      : supabaseAdmin.from('whop_entitlements').insert(patch);
-    const { error } = await query;
-    if (error) console.warn('[Whop] Entitlement upsert failed', { message: error.message });
-    return;
+  async function runWrite(writePatch: Record<string, unknown>) {
+    if (membershipId) {
+      const { data: existing } = await supabaseAdmin
+        .from('whop_entitlements')
+        .select('id')
+        .eq('whop_membership_id', membershipId)
+        .maybeSingle();
+      return existing?.id
+        ? supabaseAdmin.from('whop_entitlements').update(writePatch).eq('id', existing.id)
+        : supabaseAdmin.from('whop_entitlements').insert(writePatch);
+    }
+    return supabaseAdmin.from('whop_entitlements').insert(writePatch);
   }
 
-  const { error } = await supabaseAdmin.from('whop_entitlements').insert(patch);
-  if (error) console.warn('[Whop] Entitlement insert failed', { message: error.message });
+  let { error } = await runWrite(patch);
+  if (error && /buyer_email/i.test(error.message)) {
+    const { buyer_email: _buyerEmail, ...legacyPatch } = patch;
+    console.warn('[Whop] buyer_email column missing; entitlement stored without email auto-link support', { message: error.message });
+    ({ error } = await runWrite(legacyPatch));
+  }
+
+  if (error) console.warn('[Whop] Entitlement upsert failed', { message: error.message });
+  return;
 }
 
 async function applyPlan(user: ResolvedUser, product: ProductPlan, resetCycle: boolean, membership: WhopMembership): Promise<void> {
@@ -253,6 +287,12 @@ async function addTopup(user: ResolvedUser, membership: WhopMembership, walletUs
   if (error) throw new Error(`DB update failed: ${error.message}`);
 }
 
+function purchaseLabel(planProduct: ProductPlan | null, topup: number | null): string {
+  if (topup !== null) return `$${topup} AI Wallet top-up`;
+  if (planProduct) return `${planProduct.plan} ${planProduct.interval} plan`;
+  return 'Revro purchase';
+}
+
 export async function POST(request: NextRequest) {
   const secret = process.env.WHOP_WEBHOOK_SECRET ?? '';
   const rawBody = await request.text();
@@ -294,7 +334,11 @@ export async function POST(request: NextRequest) {
         topup,
         status: isActivationAction(action) ? 'unlinked' : 'inactive',
         source: 'webhook_unlinked',
+        buyerEmail: userEmail,
       });
+      if (isActivationAction(action) && userEmail) {
+        void sendWhopPurchaseReadyEmail(userEmail, purchaseLabel(planProduct, topup));
+      }
       console.warn('[Whop] Unlinked purchase stored for claim/relink', {
         action,
         productId,
@@ -319,6 +363,7 @@ export async function POST(request: NextRequest) {
         plan: planProduct,
         status: 'active',
         source: user!.source,
+        buyerEmail: userEmail,
       });
       console.log('[Whop] Plan applied', {
         userId: user!.id,
@@ -347,6 +392,7 @@ export async function POST(request: NextRequest) {
           topup,
           status: 'active',
           source: user!.source,
+          buyerEmail: userEmail,
         });
         console.log('[Whop] Wallet top-up applied', { userId: user!.id, walletUsd: topup, source: user!.source });
       } else if (planProduct && planProduct.plan !== 'free') {
@@ -358,6 +404,7 @@ export async function POST(request: NextRequest) {
           plan: planProduct,
           status: 'active',
           source: user!.source,
+          buyerEmail: userEmail,
         });
         console.log('[Whop] Included wallet reset', {
           userId: user!.id,
@@ -380,6 +427,7 @@ export async function POST(request: NextRequest) {
         plan: planProduct,
         status: 'inactive',
         source: user!.source,
+        buyerEmail: userEmail,
       });
       console.log('[Whop] Plan downgraded', { userId: user!.id, oldPlan, source: user!.source });
       if (userEmail) {
