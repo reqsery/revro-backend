@@ -115,3 +115,16 @@ npm run build
 For production verification, check Vercel logs for `[AI route]`,
 `[AI generation]`, `[AI Wallet]`, `[Plugin/status]`, `[Plugin/task]`,
 `[Plugin/poll]`, and `[Conversations delete]`.
+
+## Whop Test Harness
+
+`POST /api/admin/whop/test-harness` runs safe synthetic Whop entitlement
+scenarios through the real signed Whop webhook route and the same pending
+entitlement attach helper used during auth. It creates temporary
+`@revro-whop-test.local` users, prints before/after user and entitlement rows,
+asserts that wallet balance never upgrades a plan, and deletes test rows unless
+called with `?keep=1`.
+
+The route is test-only. It is available in development, and in production only
+with an admin allowlist/secret or an explicit `ENABLE_WHOP_TEST_HARNESS=true`
+override. Do not expose that override publicly.
