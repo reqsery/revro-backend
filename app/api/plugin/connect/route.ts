@@ -4,6 +4,7 @@ import { getPluginApiKey, getUserIdByPluginApiKey } from '@/lib/plugin-auth';
 import { randomUUID } from 'crypto';
 
 export const dynamic = 'force-dynamic';
+const LATEST_PLUGIN_VERSION = '2.1.0';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,9 @@ export async function POST(request: NextRequest) {
   if (!apiKey) {
     return NextResponse.json({ error: 'Missing API key' }, { status: 401 });
   }
+
+  const body = await request.json().catch(() => ({}));
+  const pluginVersion = typeof body?.plugin_version === 'string' ? body.plugin_version : null;
 
   const userId = await getUserIdByPluginApiKey(apiKey);
   if (!userId) {
@@ -49,8 +53,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create session' }, { status: 500 });
   }
 
-  console.log(`[Plugin/connect] user=${userId} session=${sessionId}`);
-  return NextResponse.json({ session_id: sessionId, ok: true });
+  console.log('[Plugin/connect] Connected', {
+    userId,
+    sessionId,
+    pluginVersion,
+    latestPluginVersion: LATEST_PLUGIN_VERSION,
+  });
+  return NextResponse.json({ session_id: sessionId, ok: true, latest_plugin_version: LATEST_PLUGIN_VERSION });
 }
 
 // ── DELETE /api/plugin/connect ────────────────────────────────────────────────

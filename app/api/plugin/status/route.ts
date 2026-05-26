@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import { getLivePluginConnection } from '@/lib/plugin-connection';
 
 export const dynamic = 'force-dynamic';
+const LATEST_PLUGIN_VERSION = '2.1.0';
 
 // ── GET /api/plugin/status ────────────────────────────────────────────────────
 // Frontend calls this to check whether the user's Roblox Studio plugin
@@ -19,6 +20,7 @@ export async function GET(request: NextRequest) {
       session_id: connection?.session_id ?? null,
       connected_at: connection?.connected_at ?? null,
       last_seen_at: connection?.last_seen_at ?? null,
+      latest_plugin_version: LATEST_PLUGIN_VERSION,
     };
 
     console.info('[Plugin/status] Response', {
