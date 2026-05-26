@@ -12,6 +12,19 @@ function getCycleEnd(interval: BillingInterval): string {
   return end.toISOString();
 }
 
+function canClaimEntitlement(entitlement: any): boolean {
+  const status = String(entitlement.status ?? '').toLowerCase();
+  const action = String(entitlement.last_event_action ?? '').toLowerCase();
+  if (status === 'inactive' || status === 'cancelled' || status === 'expired') return false;
+  if (action.includes('cancelled') || action.includes('expired') || action.includes('went_invalid')) return false;
+  return status === 'unlinked'
+    || status === 'active'
+    || action === 'membership.created'
+    || action === 'membership.went_valid'
+    || action === 'membership.renewed'
+    || action === 'payment.succeeded';
+}
+
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
@@ -37,6 +50,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Purchase not found yet. Wait a minute after checkout, then try again.' }, { status: 404 });
   }
 
+  if (!canClaimEntitlement(entitlement)) {
+    console.warn('[Whop/claim] Inactive purchase cannot be claimed', {
+      userId: user.id,
+      membershipId,
+      status: entitlement.status ?? null,
+      lastEventAction: entitlement.last_event_action ?? null,
+    });
+    return NextResponse.json({ error: 'This purchase is not active and cannot be claimed.' }, { status: 409 });
+  }
+
   if (entitlement.revro_user_id && entitlement.revro_user_id !== user.id) {
     console.warn('[Whop/claim] Already linked to another Revro account', { membershipId, requesterId: user.id });
     return NextResponse.json({ error: 'This purchase is already linked to another Revro account.' }, { status: 409 });
@@ -54,6 +77,10 @@ export async function POST(request: NextRequest) {
     const plan = entitlement.plan as PlanKey;
     const interval = (entitlement.interval ?? 'monthly') as BillingInterval;
     const config = PLAN_CONFIG[plan];
+    if (!config) {
+      console.warn('[Whop/claim] Unknown plan on entitlement', { userId: user.id, membershipId, plan });
+      return NextResponse.json({ error: 'Purchase has an unknown plan. Contact support to relink it.' }, { status: 400 });
+    }
     patchUser.plan = plan;
     patchUser.plan_source = 'whop_claimed';
     patchUser.monthly_wallet_balance = interval === 'annual'
@@ -99,4 +126,3 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ success: true });
 }
-

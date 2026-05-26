@@ -60,6 +60,13 @@ function productIdFor(membership: WhopMembership): string {
   return membership.plan_id ?? membership.product_id ?? '';
 }
 
+function isActivationAction(action: string): boolean {
+  return action === 'membership.created'
+    || action === 'membership.went_valid'
+    || action === 'membership.renewed'
+    || action === 'payment.succeeded';
+}
+
 function safePayloadForStorage(payload: WhopWebhookPayload): Record<string, unknown> {
   return {
     action: payload.action,
@@ -285,7 +292,7 @@ export async function POST(request: NextRequest) {
         payload,
         plan: planProduct,
         topup,
-        status: 'unlinked',
+        status: isActivationAction(action) ? 'unlinked' : 'inactive',
         source: 'webhook_unlinked',
       });
       console.warn('[Whop] Unlinked purchase stored for claim/relink', {
