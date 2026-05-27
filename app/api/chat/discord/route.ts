@@ -47,6 +47,23 @@ function parseDiscordResponse(raw: string): { explanation: string; config?: any 
       }
     }
   } catch {}
+
+  const firstBrace = trimmed.indexOf('{')
+  const lastBrace = trimmed.lastIndexOf('}')
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    try {
+      const jsonText = trimmed.slice(firstBrace, lastBrace + 1)
+      const config = normalizeConfig(JSON.parse(jsonText))
+      if (config) {
+        const explanation = `${trimmed.slice(0, firstBrace)} ${trimmed.slice(lastBrace + 1)}`.trim()
+        return {
+          explanation: explanation || DISCORD_PLAN_FALLBACK,
+          config,
+        }
+      }
+    } catch {}
+  }
+
   return { explanation: trimmed || DISCORD_REPLY_FALLBACK }
 }
 

@@ -21,6 +21,9 @@ interface DiscordChannel {
   name: string;
   type: 'text' | 'voice' | 'announcement' | 'forum';
   topic?: string;
+  allowed_roles?: string[];
+  denied_roles?: string[];
+  read_only?: boolean;
 }
 
 interface DiscordCategory {
@@ -154,19 +157,37 @@ function normalizeRolePermissions(value: string | undefined): string {
   }
 }
 
-function buildChannelOverwrites(guildId: string, roles: CreatedRole[]): PermissionOverwrite[] {
+function buildChannelOverwrites(guildId: string, roles: CreatedRole[], channel?: DiscordChannel): PermissionOverwrite[] {
+  const allowed = new Set((channel?.allowed_roles ?? []).map(normalizeName));
+  const denied = new Set((channel?.denied_roles ?? []).map(normalizeName));
+  const isPrivate = allowed.size > 0;
+  const isReadOnly = channel?.read_only === true;
+
   const roleOverwrites = roles
     .map((role) => ({
       id: role.id,
       type: 0 as const,
-      allow: getChannelPermissionBits(role.permissions),
-      deny: '0',
+      allow: allowed.has(normalizeName(role.name))
+        ? String(MEMBER_CHANNEL_PERMISSIONS)
+        : isPrivate
+          ? '0'
+          : getChannelPermissionBits(role.permissions),
+      deny: denied.has(normalizeName(role.name))
+        ? String(MEMBER_CHANNEL_PERMISSIONS)
+        : isReadOnly
+          ? '2048'
+          : '0',
     }))
-    .filter((overwrite) => overwrite.allow !== '0');
+    .filter((overwrite) => overwrite.allow !== '0' || overwrite.deny !== '0');
 
   return [
     // Guild id is the @everyone role id in Discord permission overwrites.
-    { id: guildId, type: 0, allow: '1024', deny: '0' },
+    {
+      id: guildId,
+      type: 0,
+      allow: isPrivate ? '0' : '1024',
+      deny: isPrivate ? '1024' : isReadOnly ? '2048' : '0',
+    },
     ...roleOverwrites,
   ];
 }
@@ -422,7 +443,7 @@ export async function POST(request: NextRequest) {
           name: channelName,
           type: channelType,
           parent_id: categoryId,
-          permission_overwrites: permissionOverwrites,
+          permission_overwrites: buildChannelOverwrites(guildId, createdRoles, channel),
           ...(channel.topic && channelType !== 2 ? { topic: channel.topic } : {}),
         });
         existingChannels.push(created);
