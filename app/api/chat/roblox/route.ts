@@ -291,14 +291,6 @@ export async function POST(request: NextRequest) {
       if (!conversation) {
         return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
       }
-      if (conversation.type !== 'roblox') {
-        console.warn('[Roblox chat] Conversation type mismatch', {
-          conversationId,
-          conversationType: conversation.type,
-        });
-        return NextResponse.json({ error: 'Start a new Roblox chat before using this tool.' }, { status: 409 });
-      }
-
       const { data: msgs } = await supabaseAdmin
         .from('messages')
         .select('role, content')

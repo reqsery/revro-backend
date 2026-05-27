@@ -76,14 +76,6 @@ export async function POST(request: NextRequest) {
       if (!conversation) {
         return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
       }
-      if (conversation.type !== 'discord') {
-        console.warn('[Discord chat] Conversation type mismatch', {
-          conversationId,
-          conversationType: conversation.type,
-        })
-        return NextResponse.json({ error: 'Start a new Discord chat before using this tool.' }, { status: 409 })
-      }
-
       const { data: msgs } = await supabaseAdmin
         .from('messages')
         .select('role, content')
