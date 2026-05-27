@@ -19,11 +19,18 @@ const DISCORD_REPLY_FALLBACK = 'I could not finish that Discord server plan clea
 
 /** Try to pull a JSON block out of the AI response, return the rest as explanation. */
 function parseDiscordResponse(raw: string): { explanation: string; config?: any } {
+  const normalizeConfig = (value: any) => {
+    if (!value || typeof value !== 'object') return undefined
+    const root = value.config && typeof value.config === 'object' ? value.config : value
+    return root?.roles || root?.categories || root?.channels ? root : undefined
+  }
+
   const trimmed = raw.trim()
   const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (match) {
     try {
-      const config = JSON.parse(match[1])
+      const config = normalizeConfig(JSON.parse(match[1]))
+      if (!config) throw new Error('JSON block is not a Discord plan')
       const explanation = trimmed.replace(match[0], '').trim()
       return {
         explanation: explanation || DISCORD_PLAN_FALLBACK,
@@ -32,8 +39,8 @@ function parseDiscordResponse(raw: string): { explanation: string; config?: any 
     } catch {}
   }
   try {
-    const config = JSON.parse(trimmed)
-    if (config?.roles || config?.categories) {
+    const config = normalizeConfig(JSON.parse(trimmed))
+    if (config) {
       return {
         explanation: DISCORD_PLAN_FALLBACK,
         config,
