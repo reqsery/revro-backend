@@ -57,7 +57,6 @@ export async function GET(request: NextRequest) {
   const { data: toReset, error: fetchResetError } = await supabaseAdmin
     .from('users')
     .select('id, email, display_name, plan, wallet_spent, monthly_wallet_balance, images_generated, billing_cycle_start')
-    .neq('plan', 'free')
     .lte('billing_cycle_end', now.toISOString())
     .is('deletion_date', null);
 

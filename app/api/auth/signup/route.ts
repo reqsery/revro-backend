@@ -63,6 +63,10 @@ export async function POST(request: NextRequest) {
 
     // The auth.users trigger normally creates this profile first. Upsert keeps
     // signup idempotent if that trigger already inserted the row.
+    const billingCycleStart = new Date();
+    const billingCycleEnd = new Date(billingCycleStart);
+    billingCycleEnd.setUTCMonth(billingCycleEnd.getUTCMonth() + 1);
+
     const { error: dbError } = await supabaseAdmin
       .from('users')
       .upsert({
@@ -77,7 +81,8 @@ export async function POST(request: NextRequest) {
         extra_wallet_balance: 0,
         wallet_spent: 0,
         images_generated: 0,
-        billing_cycle_start: new Date().toISOString()
+        billing_cycle_start: billingCycleStart.toISOString(),
+        billing_cycle_end: billingCycleEnd.toISOString()
       }, { onConflict: 'id' });
 
     if (dbError) {

@@ -132,36 +132,66 @@ export async function deductCredits(
   walletRemaining: number;
 }> {
   const walletCost = roundWallet(Math.max(Number(cost) || 0, 0));
-  const { data: walletRow, error: fetchErr } = await supabaseAdmin
-    .from('users')
-    .select('monthly_wallet_balance, extra_wallet_balance, wallet_spent, email, display_name, plan, billing_cycle_start')
-    .eq('id', userId)
-    .single();
+  let walletRow: {
+    monthly_wallet_balance: number | null;
+    extra_wallet_balance: number | null;
+    wallet_spent: number | null;
+    email: string | null;
+    display_name: string | null;
+    plan: string | null;
+    billing_cycle_start: string | null;
+  } | null = null;
+  let remaining = 0;
 
-  if (fetchErr || !walletRow) throw new Error('User not found');
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const { data: fetchedWalletRow, error: fetchErr } = await supabaseAdmin
+      .from('users')
+      .select('monthly_wallet_balance, extra_wallet_balance, wallet_spent, email, display_name, plan, billing_cycle_start')
+      .eq('id', userId)
+      .single();
 
-  const monthlyWallet = Number(walletRow.monthly_wallet_balance ?? 0);
-  const extraWallet = Number(walletRow.extra_wallet_balance ?? 0);
-  const available = monthlyWallet + extraWallet;
-  if (available < walletCost) throw new Error('Insufficient AI Wallet balance');
+    if (fetchErr || !fetchedWalletRow) throw new Error('User not found');
+    walletRow = fetchedWalletRow;
 
-  const fromMonthly = Math.min(monthlyWallet, walletCost);
-  const fromExtra = Math.max(walletCost - fromMonthly, 0);
-  const nextMonthlyWallet = roundWallet(Math.max(monthlyWallet - fromMonthly, 0));
-  const nextExtraWallet = roundWallet(Math.max(extraWallet - fromExtra, 0));
-  const remaining = roundWallet(nextMonthlyWallet + nextExtraWallet);
+    const monthlyWallet = Number(walletRow.monthly_wallet_balance ?? 0);
+    const extraWallet = Number(walletRow.extra_wallet_balance ?? 0);
+    const available = monthlyWallet + extraWallet;
+    if (available < walletCost) throw new Error('Insufficient AI Wallet balance');
 
-  const { error: updateErr } = await supabaseAdmin
-    .from('users')
-    .update({
-      monthly_wallet_balance: nextMonthlyWallet,
-      extra_wallet_balance: nextExtraWallet,
-      wallet_spent: roundWallet(Number(walletRow.wallet_spent ?? 0) + walletCost),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', userId);
+    const fromMonthly = Math.min(monthlyWallet, walletCost);
+    const fromExtra = Math.max(walletCost - fromMonthly, 0);
+    const nextMonthlyWallet = roundWallet(Math.max(monthlyWallet - fromMonthly, 0));
+    const nextExtraWallet = roundWallet(Math.max(extraWallet - fromExtra, 0));
+    const nextWalletSpent = roundWallet(Number(walletRow.wallet_spent ?? 0) + walletCost);
 
-  if (updateErr) throw new Error(`AI Wallet update failed: ${updateErr.message}`);
+    const { data: updatedRows, error: updateErr } = await supabaseAdmin
+      .from('users')
+      .update({
+        monthly_wallet_balance: nextMonthlyWallet,
+        extra_wallet_balance: nextExtraWallet,
+        wallet_spent: nextWalletSpent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+      .eq('monthly_wallet_balance', walletRow.monthly_wallet_balance ?? 0)
+      .eq('extra_wallet_balance', walletRow.extra_wallet_balance ?? 0)
+      .eq('wallet_spent', walletRow.wallet_spent ?? 0)
+      .select('monthly_wallet_balance, extra_wallet_balance, wallet_spent');
+
+    if (updateErr) throw new Error(`AI Wallet update failed: ${updateErr.message}`);
+
+    if (updatedRows && updatedRows.length === 1) {
+      remaining = roundWallet(nextMonthlyWallet + nextExtraWallet);
+      break;
+    }
+
+    if (attempt === 3) {
+      console.warn('[AI Wallet] Concurrent update retry limit reached', { userId, actionType });
+      throw new Error('AI Wallet update conflicted with another request. Please retry.');
+    }
+  }
+
+  if (!walletRow) throw new Error('User not found');
 
   const usageMetadata = {
     ...metadata,
@@ -200,13 +230,19 @@ export async function deductCredits(
     try {
       if (walletRow.plan === 'free') return;
 
+      const billingCycleStart = walletRow.billing_cycle_start
+        ? new Date(walletRow.billing_cycle_start)
+        : new Date();
       const renewalDate = new Date(
-        new Date(walletRow.billing_cycle_start).getTime() + 30 * 24 * 60 * 60 * 1000,
+        billingCycleStart.getTime() + 30 * 24 * 60 * 60 * 1000,
       ).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
+      if (!walletRow.email) return;
+      const displayName = walletRow.display_name ?? 'there';
+
       if (remaining === 0) {
-        void fireResendEvent('user.credits_depleted', walletRow.email, walletRow.display_name, {
-          first_name: walletRow.display_name,
+        void fireResendEvent('user.credits_depleted', walletRow.email, displayName, {
+          first_name: displayName,
           wallet_remaining: 0,
           plan_name: walletRow.plan,
           reset_date: renewalDate,
@@ -228,8 +264,8 @@ export async function deductCredits(
         .update({ low_credits_email_sent: true })
         .eq('id', userId);
 
-      void fireResendEvent('user.low_credits', walletRow.email, walletRow.display_name, {
-        first_name: walletRow.display_name,
+      void fireResendEvent('user.low_credits', walletRow.email, displayName, {
+        first_name: displayName,
         wallet_remaining: remaining,
         plan_name: walletRow.plan,
         renewal_date: renewalDate,
