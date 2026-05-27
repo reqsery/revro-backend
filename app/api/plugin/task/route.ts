@@ -40,13 +40,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { task_type, data } = body;
+  let { task_type, data } = body;
 
   if (!task_type || !(VALID_TASK_TYPES as readonly string[]).includes(task_type)) {
     return NextResponse.json(
       { error: `Invalid task_type. Valid types: ${VALID_TASK_TYPES.join(', ')}` },
       { status: 400 },
     );
+  }
+
+  if (task_type === 'CREATE_MODULE_SCRIPT') {
+    const normalizedData = data && typeof data === 'object' && !Array.isArray(data)
+      ? { ...(data as Record<string, unknown>), script_type: 'ModuleScript' }
+      : { script_type: 'ModuleScript' };
+    task_type = 'INSERT_SCRIPT';
+    data = normalizedData;
   }
 
   const connection = await getLivePluginConnection(user.id, 'task_route');
