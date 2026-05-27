@@ -50,6 +50,43 @@ client-side cost estimates are informational only.
 - Whop webhooks for memberships and top-ups
 - Resend lifecycle emails
 
+## Roblox Studio Workflow
+
+Revro chat should behave like an AI Roblox workspace, not a clipboard-first
+script generator. For Roblox script and UI generations, the frontend parses the
+assistant response for a `revro_studio_tasks` manifest or infers Studio tasks
+from generated Luau. When the authenticated user's Studio plugin is connected,
+Revro automatically queues the generated Studio assembly after streaming
+finishes.
+
+Expected flow:
+
+1. The frontend checks `/api/plugin/status`.
+2. If the plugin is live, generated Studio tasks are queued through
+   `/api/plugin/task`.
+3. The Roblox Studio plugin polls `/api/plugin/poll`, executes each task, and
+   posts the result to `/api/plugin/result`.
+4. The chat shows natural orchestration states such as "Inserting...",
+   "Inserted into Studio", "Failed", or "Connect the Studio plugin".
+
+Manual Insert remains available for retry, disconnected sessions, and explicit
+user control. Clipboard fallback is only for disconnected or failed manual
+insert attempts.
+
+Supported Studio task types include:
+
+- `INSERT_SCRIPT`
+- `CREATE_UI`
+- `INSERT_INSTANCE`
+- `CREATE_FOLDER`
+- `CREATE_REMOTE_EVENT`
+- `CREATE_MODULE_SCRIPT`
+- `APPLY_PROPERTIES`
+- `READ_EXPLORER`
+- `START_PLAYTEST`
+- `STOP_PLAYTEST`
+- `READ_OUTPUT`
+
 ## Environment
 
 Production requires:
