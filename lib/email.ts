@@ -1,6 +1,8 @@
 ﻿import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+const EMAIL_LOGO_HTML = '<img src="https://revro.dev/email-logo.png" alt="Revro" width="156" height="38" style="display:block;margin:0 0 28px;height:38px;width:auto;" />';
+const EMAIL_LOGO_CENTER_HTML = '<img src="https://revro.dev/email-logo.png" alt="Revro" width="156" height="38" style="display:inline-block;height:38px;width:auto;" />';
 
 // Email templates as simple HTML strings for now
 // Later you can import React Email templates
@@ -21,6 +23,7 @@ const WELCOME_EMAIL_HTML = (userName: string, apiKey: string) => `
 </head>
 <body>
   <div class="container">
+    ${EMAIL_LOGO_HTML}
     <h1>Welcome to Revro</h1>
     <p>Hi ${userName},</p>
     <p>You now have access to AI-powered tools that help you create Roblox scripts, UI elements, and Discord server setups.</p>
@@ -68,6 +71,7 @@ const VERIFICATION_EMAIL_HTML = (verificationCode: string, verificationUrl: stri
 </head>
 <body>
   <div class="container">
+    ${EMAIL_LOGO_HTML}
     <h1>Verify Your Email</h1>
     <p>Thanks for signing up for Revro! Please verify your email address to get started.</p>
     
@@ -108,6 +112,7 @@ const PASSWORD_RESET_EMAIL_HTML = (resetUrl: string) => `
 </head>
 <body>
   <div class="container">
+    ${EMAIL_LOGO_HTML}
     <h1>Reset Your Password</h1>
     <p>We received a request to reset your password for your Revro account.</p>
     <p>Click the button below to create a new password:</p>
@@ -235,6 +240,7 @@ export async function sendLowCreditsEmail(
       </head>
       <body>
         <div class="container">
+          ${EMAIL_LOGO_HTML}
           <h1>Running Low on AI Wallet</h1>
           <p>Hi ${userName},</p>
           <p>You have <strong>$${Number(creditsRemaining).toFixed(2)} out of $${Number(creditsTotal).toFixed(2)} AI Wallet</strong> remaining this cycle.</p>
@@ -303,6 +309,7 @@ export async function sendMonthlyUsageEmail(
       </head>
       <body>
         <div class="container">
+          ${EMAIL_LOGO_HTML}
           <h1>Your ${month} Summary</h1>
           <p>Hi ${userName},</p>
           <p>Here's what you built with Revro in ${month}:</p>
@@ -375,6 +382,7 @@ export async function sendPaymentConfirmationEmail(
       </head>
       <body>
         <div class="container">
+          ${EMAIL_LOGO_HTML}
           <h1>Payment Confirmed</h1>
           <p>Hi ${userName},</p>
           <p>Your payment was successful. You now have access to all <strong>${plan}</strong> plan features.</p>
@@ -438,6 +446,7 @@ export async function sendPaymentFailedEmail(
       </head>
       <body>
         <div class="container">
+          ${EMAIL_LOGO_HTML}
           <h1>Payment Failed</h1>
           <p>Hi ${userName},</p>
           <p>We were unable to process your payment for the <strong>${plan}</strong> plan.</p>
@@ -495,6 +504,7 @@ export async function sendAccountDeletionScheduledEmail(
       </head>
       <body>
         <div class="container">
+          ${EMAIL_LOGO_HTML}
           <h1>Account Deletion Scheduled</h1>
           <p>Hi ${userName},</p>
           <p>Your Revro account has been scheduled for deletion. All your data will be permanently removed on <strong>${deletionDate}</strong>.</p>
@@ -544,6 +554,7 @@ export async function sendDeletionCancelledEmail(
       </head>
       <body>
         <div class="container">
+          ${EMAIL_LOGO_HTML}
           <h1>Account Deletion Cancelled</h1>
           <p>Hi ${userName},</p>
           <p>Great news â€” your account deletion has been successfully cancelled. Your Revro account and all your data are safe.</p>
@@ -592,7 +603,7 @@ export async function sendCreatePasswordEmail(
 
         <!-- Logo -->
         <tr><td style="padding-bottom:32px;text-align:center;">
-          <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Revro</span>
+          ${EMAIL_LOGO_CENTER_HTML}
         </td></tr>
 
         <!-- Card -->
@@ -659,6 +670,7 @@ export async function sendWhopPurchaseReadyEmail(
       subject: 'Your Revro purchase is ready',
       html: `
         <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1d1c1d;max-width:560px;margin:0 auto;padding:32px 20px;">
+          ${EMAIL_LOGO_HTML}
           <h1 style="font-size:28px;margin:0 0 16px;">Your Revro purchase is ready</h1>
           <p>We received your Whop purchase for <strong>${planOrTopup}</strong>.</p>
           <p>Create a Revro account or sign in using this same email address and your purchase will activate automatically.</p>
@@ -699,6 +711,7 @@ export async function sendSubscriptionCancelledEmail(
       </head>
       <body>
         <div class="container">
+          ${EMAIL_LOGO_HTML}
           <h1>Subscription Cancelled</h1>
           <p>Hi ${userName},</p>
           <p>Your <strong>${plan}</strong> subscription has been cancelled. You'll continue to have access until <strong>${accessUntil}</strong>, after which your account reverts to the Free plan.</p>
