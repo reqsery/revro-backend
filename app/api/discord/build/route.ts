@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { CREDIT_COSTS, deductCredits } from '@/lib/credits';
+import { CREDIT_COSTS, deductCredits, hasCredits } from '@/lib/credits';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -204,6 +204,18 @@ function recordBuildStep(operation: string, detail: string) {
   console.info('[Discord build] Step complete', { operation, detail });
 }
 
+function successfulOperationCount(result: BuildResult): number {
+  return [
+    result.rolesCreated,
+    result.rolesReused,
+    result.categoriesCreated,
+    result.categoriesReused,
+    result.channelsCreated,
+    result.channelsReused,
+    result.channelsDeleted,
+  ].reduce((count, items) => count + items.length, 0);
+}
+
 function getChannelType(channel: DiscordChannel): number {
   if (channel.type === 'voice') return 2; // GUILD_VOICE
   if (channel.type === 'announcement') return 5; // GUILD_ANNOUNCEMENT
@@ -279,14 +291,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Deduct a small AI Wallet operation charge for the server build.
   try {
-    await deductCredits(user.id, CREDIT_COSTS.DISCORD_BUILD, 'discord_build', {
-      guild_id: guildId,
-      provider: 'discord',
-      model: 'builder',
-      estimated_real_usd_cost: CREDIT_COSTS.DISCORD_BUILD,
-    });
+    if (!(await hasCredits(user.id, CREDIT_COSTS.DISCORD_BUILD))) {
+      return NextResponse.json({ error: 'Insufficient AI Wallet balance' }, { status: 402 });
+    }
   } catch (err: any) {
     if (err.message === 'Insufficient AI Wallet balance') {
       return NextResponse.json({ error: err.message }, { status: 402 });
@@ -455,6 +463,32 @@ export async function POST(request: NextRequest) {
         recordBuildError(result, `Channel "${channel.name}"`, err);
       }
     }
+  }
+
+  if (successfulOperationCount(result) > 0) {
+    try {
+      await deductCredits(user.id, CREDIT_COSTS.DISCORD_BUILD, 'discord_build', {
+        guild_id: guildId,
+        provider: 'discord',
+        model: 'builder',
+        estimated_real_usd_cost: CREDIT_COSTS.DISCORD_BUILD,
+        successful_operations: successfulOperationCount(result),
+        failed_operations: result.failed.length,
+      });
+    } catch (err: any) {
+      if (err.message === 'Insufficient AI Wallet balance') {
+        result.failed.push('AI Wallet charge failed after Discord operations completed. Contact support.');
+        result.errors.push('AI Wallet charge failed after Discord operations completed. Contact support.');
+      } else {
+        throw err;
+      }
+    }
+  } else if (result.failed.length > 0) {
+    console.warn('[Discord build] No charge applied because no Discord operations completed', {
+      userId: user.id,
+      guildId,
+      failed: result.failed.length,
+    });
   }
 
   return NextResponse.json({ success: result.failed.length === 0, result });
