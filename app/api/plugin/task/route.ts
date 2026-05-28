@@ -18,7 +18,6 @@ const VALID_TASK_TYPES = [
   'STOP_PLAYTEST',
   'READ_OUTPUT',
   'AUTO_PLAYTEST',
-  'UPLOAD_IMAGE',
   'APPLY_IMAGE',
 ] as const;
 
