@@ -132,32 +132,6 @@ export async function POST(request: NextRequest) {
       aiResponse.usage?.output_tokens ?? 0,
     )
 
-    const creditResult = await deductCredits(user.id, cost, 'discord_generation', {
-      model: selection.logicalModel,
-      actualModel: selection.actualModel,
-      provider: selection.provider,
-      input_tokens:  aiResponse.usage?.input_tokens,
-      output_tokens: aiResponse.usage?.output_tokens,
-      image_cost: null,
-      file_context_cost: null,
-      estimated_real_usd_cost: cost,
-    })
-    console.info('[AI generation]', {
-      route: 'discord',
-      provider: selection.provider,
-      model: selection.actualModel,
-      selectedModelTier: planModel,
-      ...getAIRoutingDebug('discord', fullPrompt, planModel),
-      inputTokenEstimate: estimateInputTokens(fullPrompt, history),
-      inputTokens: aiResponse.usage?.input_tokens ?? 0,
-      outputTokens: aiResponse.usage?.output_tokens ?? 0,
-      imageCost: null,
-      fileContextCost: null,
-      estimatedRealUsdCost: cost,
-      deductedWalletAmount: cost,
-      userId: user.id,
-    })
-
     if (!aiResponse.content.trim()) {
       console.error('[Discord chat] Empty AI response', {
         model: selection.actualModel,
@@ -223,6 +197,32 @@ export async function POST(request: NextRequest) {
 
       messageId = assistantMsg?.id ?? null
     }
+
+    const creditResult = await deductCredits(user.id, cost, 'discord_generation', {
+      model: selection.logicalModel,
+      actualModel: selection.actualModel,
+      provider: selection.provider,
+      input_tokens:  aiResponse.usage?.input_tokens,
+      output_tokens: aiResponse.usage?.output_tokens,
+      image_cost: null,
+      file_context_cost: null,
+      estimated_real_usd_cost: cost,
+    })
+    console.info('[AI generation]', {
+      route: 'discord',
+      provider: selection.provider,
+      model: selection.actualModel,
+      selectedModelTier: planModel,
+      ...getAIRoutingDebug('discord', fullPrompt, planModel),
+      inputTokenEstimate: estimateInputTokens(fullPrompt, history),
+      inputTokens: aiResponse.usage?.input_tokens ?? 0,
+      outputTokens: aiResponse.usage?.output_tokens ?? 0,
+      imageCost: null,
+      fileContextCost: null,
+      estimatedRealUsdCost: cost,
+      deductedWalletAmount: cost,
+      userId: user.id,
+    })
 
     return NextResponse.json({
       response: {

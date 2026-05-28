@@ -319,7 +319,7 @@ Get user's conversation history.
 
 Send a task to the Roblox Studio plugin.
 
-**Authentication:** Required (API Key only)
+**Authentication:** Required (user session)
 
 **Request Body:**
 ```json
@@ -336,10 +336,15 @@ Send a task to the Roblox Studio plugin.
 - `INSERT_SCRIPT` - Insert Lua script into Studio
 - `CREATE_UI` - Create UI elements
 - `INSERT_INSTANCE` - Insert Roblox instances
+- `CREATE_FOLDER` - Create or reuse a Folder
+- `CREATE_REMOTE_EVENT` - Create or reuse a RemoteEvent
+- `CREATE_MODULE_SCRIPT` - Compatibility alias for a ModuleScript insert
+- `APPLY_PROPERTIES` - Apply properties to an existing instance
 - `READ_EXPLORER` - Read Studio explorer tree
 - `START_PLAYTEST` - Start playtest
+- `STOP_PLAYTEST` - Stop playtest
+- `READ_OUTPUT` - Read recent Studio output logs
 - `AUTO_PLAYTEST` - Auto playtest with checks
-- `UPLOAD_IMAGE` - Upload image asset
 - `APPLY_IMAGE` - Apply image to object
 
 **Success Response (200):**

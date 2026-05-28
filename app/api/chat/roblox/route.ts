@@ -4,6 +4,7 @@ import {
   canGenerateImages,
   deductCredits,
   getModelForPlan,
+  hasCredits,
   incrementImageCount,
   estimateTokenCostUsd,
   CREDIT_COSTS,
@@ -317,14 +318,6 @@ export async function POST(request: NextRequest) {
         deductedWalletAmount: cost,
         userId: user.id,
       });
-      const creditResult = await deductCredits(user.id, cost, 'image_refine', {
-        model: selection.logicalModel,
-        actualModel: selection.actualModel,
-        provider: selection.provider,
-        image_cost: null,
-        file_context_cost: null,
-        estimated_real_usd_cost: cost,
-      });
       const promptSummary = refinedPrompts.map(item => `${item.label}: ${item.prompt}`).join('\n\n');
       const { convId, messageId } = await saveMessages(
         user.id,
@@ -334,6 +327,14 @@ export async function POST(request: NextRequest) {
         planModel,
         cost,
       );
+      const creditResult = await deductCredits(user.id, cost, 'image_refine', {
+        model: selection.logicalModel,
+        actualModel: selection.actualModel,
+        provider: selection.provider,
+        image_cost: null,
+        file_context_cost: null,
+        estimated_real_usd_cost: cost,
+      });
 
       return NextResponse.json({
         response: {
@@ -362,6 +363,10 @@ export async function POST(request: NextRequest) {
       }
 
       const cost = CREDIT_COSTS.IMAGE * prompts.length;
+      if (!(await hasCredits(user.id, cost))) {
+        return NextResponse.json({ error: 'Insufficient AI Wallet balance' }, { status: 402 });
+      }
+
       const imageUrls = await Promise.all(prompts.map(item => generateImage(item)));
       console.info('[AI generation]', {
         route: 'roblox_image_generate',
@@ -377,15 +382,6 @@ export async function POST(request: NextRequest) {
         deductedWalletAmount: cost,
         userId: user.id,
       });
-      const creditResult = await deductCredits(user.id, cost, 'image_generation', {
-        model: 'gpt-image-1.5',
-        actualModel: 'gpt-image-1.5',
-        provider: 'openai',
-        image_cost: cost,
-        file_context_cost: null,
-        estimated_real_usd_cost: cost,
-      });
-      await incrementImageCount(user.id, prompts.length);
       const { convId, messageId } = await saveMessages(
         user.id,
         conversationId,
@@ -394,6 +390,15 @@ export async function POST(request: NextRequest) {
         planModel,
         cost,
       );
+      await incrementImageCount(user.id, prompts.length);
+      const creditResult = await deductCredits(user.id, cost, 'image_generation', {
+        model: 'gpt-image-1.5',
+        actualModel: 'gpt-image-1.5',
+        provider: 'openai',
+        image_cost: cost,
+        file_context_cost: null,
+        estimated_real_usd_cost: cost,
+      });
 
       return NextResponse.json({
         response: {
@@ -472,6 +477,15 @@ export async function POST(request: NextRequest) {
           const totalTokens = inputTokens + outputTokens;
           const tokenCost = estimateTokenCostUsd(selection.actualModel, inputTokens, outputTokens);
 
+          const { convId, messageId } = await saveMessages(
+            user.id,
+            conversationId,
+            prompt,
+            fullContent,
+            planModel,
+            tokenCost,
+          );
+
           const creditResult = await deductCredits(user.id, tokenCost, `${type}_generation`, {
             model: selection.logicalModel,
             actualModel: selection.actualModel,
@@ -498,15 +512,6 @@ export async function POST(request: NextRequest) {
             deductedWalletAmount: tokenCost,
             userId: user.id,
           });
-
-          const { convId, messageId } = await saveMessages(
-            user.id,
-            conversationId,
-            prompt,
-            fullContent,
-            planModel,
-            tokenCost,
-          );
 
           controller.enqueue(
             encoder.encode(
