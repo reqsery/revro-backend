@@ -390,7 +390,6 @@ export async function POST(request: NextRequest) {
         planModel,
         cost,
       );
-      await incrementImageCount(user.id, prompts.length);
       const creditResult = await deductCredits(user.id, cost, 'image_generation', {
         model: 'gpt-image-1.5',
         actualModel: 'gpt-image-1.5',
@@ -399,6 +398,7 @@ export async function POST(request: NextRequest) {
         file_context_cost: null,
         estimated_real_usd_cost: cost,
       });
+      await incrementImageCount(user.id, prompts.length);
 
       return NextResponse.json({
         response: {

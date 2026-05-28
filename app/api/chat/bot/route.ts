@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits, estimateTokenCostUsd, getModelForPlan } from '@/lib/credits';
+import { deductCredits, estimateTokenCostUsd, getModelForPlan, hasCredits } from '@/lib/credits';
 import { callAI, selectAIModel, estimateInputTokens, getAIRoutingDebug } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -21,6 +21,10 @@ export async function POST(request: NextRequest) {
     }
 
     const planModel = getModelForPlan(user.plan);
+    if (!(await hasCredits(user.id, 0.000001))) {
+      return NextResponse.json({ error: 'Insufficient AI Wallet balance' }, { status: 402 });
+    }
+
     const fullPrompt = `Create a Discord bot named "${botName}". ${prompt}`;
     const selection = selectAIModel(planModel, 'bot', fullPrompt);
     console.info('[AI route]', {
