@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits, estimateTokenCostUsd, getModelForPlan } from '@/lib/credits';
+import { deductCredits, estimateTokenCostUsd, getAllowedRequestedModel } from '@/lib/credits';
 import { callAI, selectAIModel, estimateInputTokens, getAIRoutingDebug } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
-    const planModel = getModelForPlan(user.plan)
+    const planModel = getAllowedRequestedModel(user.plan, body.model)
 
     // Fetch conversation history
     let history: any[] = []

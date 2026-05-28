@@ -104,6 +104,19 @@ export function getModelForPlan(plan: string): string {
   return config?.model || 'codex-mini';
 }
 
+const MODEL_ACCESS_ORDER = ['codex-mini', 'codex-standard', 'codex-premium', 'codex-max'];
+
+export function getAllowedRequestedModel(plan: string, requestedModel?: unknown): string {
+  const planModel = getModelForPlan(plan);
+  if (typeof requestedModel !== 'string') return planModel;
+
+  const requestedIndex = MODEL_ACCESS_ORDER.indexOf(requestedModel);
+  const planIndex = MODEL_ACCESS_ORDER.indexOf(planModel);
+  if (requestedIndex === -1 || planIndex === -1) return planModel;
+
+  return requestedIndex <= planIndex ? requestedModel : planModel;
+}
+
 function roundWallet(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }

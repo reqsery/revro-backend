@@ -3,7 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import {
   canGenerateImages,
   deductCredits,
-  getModelForPlan,
+  getAllowedRequestedModel,
   hasCredits,
   incrementImageCount,
   estimateTokenCostUsd,
@@ -276,7 +276,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
-    const planModel = getModelForPlan(user.plan);
+    const planModel = getAllowedRequestedModel(user.plan, body.model);
     const selection = selectAIModel(planModel, 'roblox', prompt);
 
     let history: any[] = [];

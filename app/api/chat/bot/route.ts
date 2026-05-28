@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { deductCredits, estimateTokenCostUsd, getModelForPlan, hasCredits } from '@/lib/credits';
+import { deductCredits, estimateTokenCostUsd, getAllowedRequestedModel, hasCredits } from '@/lib/credits';
 import { callAI, selectAIModel, estimateInputTokens, getAIRoutingDebug } from '@/lib/codex';
 import { supabaseAdmin } from '@/lib/supabase';
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
     }
 
-    const planModel = getModelForPlan(user.plan);
+    const planModel = getAllowedRequestedModel(user.plan, body.model);
     if (!(await hasCredits(user.id, 0.000001))) {
       return NextResponse.json({ error: 'Insufficient AI Wallet balance' }, { status: 402 });
     }
