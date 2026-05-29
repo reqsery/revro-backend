@@ -17,6 +17,16 @@ function getConversationId(value: unknown): string | undefined {
 const DISCORD_PLAN_FALLBACK = 'I planned the Discord server structure. Review it below before building it.'
 const DISCORD_REPLY_FALLBACK = 'I could not finish that Discord server plan cleanly. Send the setup request again and I will rebuild it.'
 
+function compactExecutionSummary(value: string): string {
+  const cleaned = value
+    .replace(/\s+/g, ' ')
+    .replace(/\b(meticulously|comprehensive|complete blueprint|ready for deployment)\b/gi, '')
+    .trim();
+  if (!cleaned) return DISCORD_PLAN_FALLBACK;
+  const firstSentence = cleaned.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? cleaned;
+  return firstSentence.length > 180 ? `${firstSentence.slice(0, 177).trim()}...` : firstSentence;
+}
+
 /** Try to pull a JSON block out of the AI response, return the rest as explanation. */
 function parseDiscordResponse(raw: string): { explanation: string; config?: any } {
   const normalizeConfig = (value: any) => {
@@ -33,7 +43,7 @@ function parseDiscordResponse(raw: string): { explanation: string; config?: any 
       if (!config) throw new Error('JSON block is not a Discord plan')
       const explanation = trimmed.replace(match[0], '').trim()
       return {
-        explanation: explanation || DISCORD_PLAN_FALLBACK,
+        explanation: compactExecutionSummary(explanation),
         config,
       }
     } catch {}
@@ -57,14 +67,14 @@ function parseDiscordResponse(raw: string): { explanation: string; config?: any 
       if (config) {
         const explanation = `${trimmed.slice(0, firstBrace)} ${trimmed.slice(lastBrace + 1)}`.trim()
         return {
-          explanation: explanation || DISCORD_PLAN_FALLBACK,
+          explanation: compactExecutionSummary(explanation),
           config,
         }
       }
     } catch {}
   }
 
-  return { explanation: trimmed || DISCORD_REPLY_FALLBACK }
+  return { explanation: compactExecutionSummary(trimmed || DISCORD_REPLY_FALLBACK) }
 }
 
 export async function POST(request: NextRequest) {
