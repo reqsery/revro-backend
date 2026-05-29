@@ -22,6 +22,8 @@ function getStripe(): StripeInstance {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PlanKey = keyof typeof PLAN_CONFIG;
+type BillingInterval = 'monthly' | 'annual';
+type StripeProductPlan = { plan: PlanKey; interval: BillingInterval };
 
 // ── Plan mapping ──────────────────────────────────────────────────────────────
 //
@@ -37,27 +39,27 @@ type PlanKey = keyof typeof PLAN_CONFIG;
 // One price per plan is enough for monthly billing. If you offer annual prices
 // as well, add STRIPE_PRICE_STARTER_ANNUAL etc. and extend the map below.
 
-function buildPriceMap(): Record<string, PlanKey> {
-  const map: Record<string, PlanKey> = {};
+function buildPriceMap(): Record<string, StripeProductPlan> {
+  const map: Record<string, StripeProductPlan> = {};
 
-  const pairs: [string, PlanKey][] = [
-    ['STRIPE_PRICE_STARTER',        'starter'],
-    ['STRIPE_PRICE_STARTER_ANNUAL', 'starter'],
-    ['STRIPE_PRICE_PRO',            'pro'],
-    ['STRIPE_PRICE_PRO_ANNUAL',     'pro'],
-    ['STRIPE_PRICE_STUDIO',         'studio'],
-    ['STRIPE_PRICE_STUDIO_ANNUAL',  'studio'],
+  const pairs: [string, PlanKey, BillingInterval][] = [
+    ['STRIPE_PRICE_STARTER',        'starter', 'monthly'],
+    ['STRIPE_PRICE_STARTER_ANNUAL', 'starter', 'annual'],
+    ['STRIPE_PRICE_PRO',            'pro',     'monthly'],
+    ['STRIPE_PRICE_PRO_ANNUAL',     'pro',     'annual'],
+    ['STRIPE_PRICE_STUDIO',         'studio',  'monthly'],
+    ['STRIPE_PRICE_STUDIO_ANNUAL',  'studio',  'annual'],
   ];
 
-  for (const [envKey, plan] of pairs) {
+  for (const [envKey, plan, interval] of pairs) {
     const priceId = process.env[envKey];
-    if (priceId) map[priceId] = plan;
+    if (priceId) map[priceId] = { plan, interval };
   }
 
   return map;
 }
 
-function planFromPriceId(priceId: string): PlanKey | null {
+function planFromPriceId(priceId: string): StripeProductPlan | null {
   return buildPriceMap()[priceId] ?? null;
 }
 
@@ -76,21 +78,28 @@ async function findUser(email: string) {
 
 async function applyPlan(
   userId: string,
-  plan: PlanKey,
+  product: StripeProductPlan,
   resetCycle: boolean,
 ): Promise<void> {
-  const config = PLAN_CONFIG[plan];
+  const config = PLAN_CONFIG[product.plan];
+  const now = new Date();
+  const billingCycleEnd = new Date(now);
+  billingCycleEnd.setUTCMonth(billingCycleEnd.getUTCMonth() + (product.interval === 'annual' ? 12 : 1));
 
   const patch: Record<string, unknown> = {
-    plan,
+    plan: product.plan,
     credits_total: config.credits,
-    updated_at:   new Date().toISOString(),
+    monthly_wallet_balance: product.interval === 'annual'
+      ? config.wallet_annual_usd
+      : config.wallet_monthly_usd,
+    billing_cycle_end: billingCycleEnd.toISOString(),
+    updated_at: now.toISOString(),
   };
 
   if (resetCycle) {
     patch.credits_used        = 0;
     patch.images_generated    = 0;
-    patch.billing_cycle_start = new Date().toISOString();
+    patch.billing_cycle_start = now.toISOString();
   }
 
   const { error } = await supabaseAdmin
@@ -181,9 +190,9 @@ export async function POST(request: NextRequest) {
       case 'customer.subscription.created': {
         const sub = event.data.object as StripeTypes.Subscription;
         const priceId = sub.items.data[0]?.price?.id ?? '';
-        const plan    = planFromPriceId(priceId);
+        const product = planFromPriceId(priceId);
 
-        if (!plan) {
+        if (!product) {
           console.warn(`[Stripe] Unknown price ID "${priceId}" — skipping`);
           break;
         }
@@ -194,8 +203,8 @@ export async function POST(request: NextRequest) {
         const user = await findUser(email);
         if (!user) { console.error(`[Stripe] User not found: ${email}`); break; }
 
-        await applyPlan(user.id, plan, true);
-        console.log(`[Stripe] subscription.created: ${email} → ${plan}`);
+        await applyPlan(user.id, product, true);
+        console.log(`[Stripe] subscription.created: ${email} -> ${product.plan}`);
         break;
       }
 
@@ -203,9 +212,9 @@ export async function POST(request: NextRequest) {
       case 'customer.subscription.updated': {
         const sub     = event.data.object as StripeTypes.Subscription;
         const priceId = sub.items.data[0]?.price?.id ?? '';
-        const plan    = planFromPriceId(priceId);
+        const product = planFromPriceId(priceId);
 
-        if (!plan) {
+        if (!product) {
           console.warn(`[Stripe] Unknown price ID "${priceId}" — skipping`);
           break;
         }
@@ -216,10 +225,10 @@ export async function POST(request: NextRequest) {
         const user = await findUser(email);
         if (!user) { console.error(`[Stripe] User not found: ${email}`); break; }
 
-        const planChanged = user.plan !== plan;
-        await applyPlan(user.id, plan, planChanged);
+        const planChanged = user.plan !== product.plan;
+        await applyPlan(user.id, product, planChanged);
         console.log(
-          `[Stripe] subscription.updated: ${email} → ${plan}` +
+          `[Stripe] subscription.updated: ${email} -> ${product.plan}` +
           (planChanged ? ' (cycle reset)' : ' (same plan, credits kept)'),
         );
         break;
@@ -256,13 +265,13 @@ export async function POST(request: NextRequest) {
         // Determine plan from the invoice line item (Stripe v22: pricing.price_details.price)
         const rawPrice = invoice.lines?.data?.[0]?.pricing?.price_details?.price;
         const priceId = typeof rawPrice === 'string' ? rawPrice : (rawPrice as StripeTypes.Price | undefined)?.id ?? '';
-        const planFromInvoice = planFromPriceId(priceId);
-        const plan = planFromInvoice ?? (user.plan as PlanKey);
+        const productFromInvoice = planFromPriceId(priceId);
+        const product = productFromInvoice ?? { plan: user.plan as PlanKey, interval: 'monthly' as const };
 
-        if (!PLAN_CONFIG[plan] || plan === 'free') break;
+        if (!PLAN_CONFIG[product.plan] || product.plan === 'free') break;
 
-        await applyPlan(user.id, plan, true); // always reset on payment
-        console.log(`[Stripe] invoice.paid: ${email} → credits reset (plan: ${plan})`);
+        await applyPlan(user.id, product, true); // always reset on payment
+        console.log(`[Stripe] invoice.paid: ${email} -> wallet reset (plan: ${product.plan})`);
         break;
       }
 
