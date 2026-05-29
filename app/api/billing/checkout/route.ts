@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       checkout_id: checkoutId,
       metadata,
-      return_url: 'https://revro.dev/checkout/complete',
+      return_url: 'https://revro.dev/billing/success',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -63,4 +63,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
   }
 }
-

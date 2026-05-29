@@ -27,7 +27,7 @@ purchase email is not enough to assign entitlement.
 
 | Plan | Price | Included AI Wallet | Access |
 |------|-------|--------------------|--------|
-| Free | $0 | $0.50 one-time gift | Standard queue, 2,000 character prompts |
+| Free | $0 | $0.15 monthly refill | Standard queue, 2,000 character prompts |
 | Pro | $19/mo or $190/yr | $10 monthly or $120 annual upfront | Priority queue, 16,000 character prompts, VS Code/Cursor access, private projects |
 | Dev | $49/mo or $490/yr | $30 monthly or $360 annual upfront | 64,000 character context, GitHub sync, multi-file debugging, file uploads, advanced Studio workflows |
 | Studio | $129/mo or $1,290/yr | $85 monthly or $1,020 annual upfront | Team wallet for up to 5 developers, automation/playtest loops, highest priority, priority support |

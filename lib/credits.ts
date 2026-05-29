@@ -51,8 +51,8 @@ export function tokensToCreditCost(planModel: string, totalTokens: number): numb
 export const PLAN_CONFIG = {
   free: {
     credits: 25,
-    wallet_monthly_usd: 0.5,
-    wallet_annual_usd: 0.5,
+    wallet_monthly_usd: 0.15,
+    wallet_annual_usd: 0.15,
     images_max: 0,
     model: 'codex-mini',
     display_name: 'Fast',

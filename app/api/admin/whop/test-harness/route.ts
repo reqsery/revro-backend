@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getUser } from '@/lib/auth';
+import { PLAN_CONFIG } from '@/lib/credits';
 import { supabaseAdmin } from '@/lib/supabase';
 import { attachPendingWhopEntitlementsForUser } from '@/lib/whop-entitlements';
 import { POST as whopWebhookPOST } from '@/app/api/webhooks/whop/route';
@@ -133,7 +134,7 @@ async function insertHarnessUser(id: string, email: string, plan = 'free', extra
     plan_source: 'whop_test_harness',
     credits_total: 25,
     credits_used: 0,
-    monthly_wallet_balance: 0.5,
+    monthly_wallet_balance: PLAN_CONFIG.free.wallet_monthly_usd,
     extra_wallet_balance: extraWallet,
     wallet_spent: 0,
     images_generated: 0,
