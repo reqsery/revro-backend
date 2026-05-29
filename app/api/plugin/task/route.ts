@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth';
 import { getLivePluginConnection } from '@/lib/plugin-connection';
 
 export const dynamic = 'force-dynamic';
+const RUNNING_TASK_TIMEOUT_MS = 20_000;
 
 const VALID_TASK_TYPES = [
   'INSERT_SCRIPT',
@@ -114,7 +115,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing task_id query param' }, { status: 400 });
   }
 
-  const { data: task, error: dbErr } = await supabaseAdmin
+  let { data: task, error: dbErr } = await supabaseAdmin
     .from('plugin_tasks')
     .select('id, task_type, status, result, error, created_at, updated_at, completed_at')
     .eq('id', taskId)
@@ -123,6 +124,37 @@ export async function GET(request: NextRequest) {
 
   if (dbErr || !task) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+  }
+
+  if (task.status === 'running') {
+    const updatedAt = task.updated_at ? new Date(task.updated_at).getTime() : 0;
+    const stale = !Number.isFinite(updatedAt) || Date.now() - updatedAt > RUNNING_TASK_TIMEOUT_MS;
+    if (stale) {
+      const now = new Date().toISOString();
+      const message = 'Roblox Studio did not report a result for this task. Retry Insert after checking the plugin.';
+      const { data: failedTask, error: failErr } = await supabaseAdmin
+        .from('plugin_tasks')
+        .update({
+          status: 'failed',
+          error: message,
+          updated_at: now,
+          completed_at: now,
+        })
+        .eq('id', taskId)
+        .eq('user_id', user.id)
+        .eq('status', 'running')
+        .select('id, task_type, status, result, error, created_at, updated_at, completed_at')
+        .single();
+
+      if (!failErr && failedTask) {
+        console.warn('[Plugin/task] Marked stale running task failed', {
+          taskId,
+          userId: user.id,
+          taskType: task.task_type,
+        });
+        task = failedTask;
+      }
+    }
   }
 
   return NextResponse.json({ task });

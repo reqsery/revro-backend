@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   const now = new Date().toISOString();
   const status = success ? 'done' : 'failed';
 
-  const { error: dbErr } = await supabaseAdmin
+  const { data: updatedRows, error: dbErr } = await supabaseAdmin
     .from('plugin_tasks')
     .update({
       status,
@@ -46,11 +46,17 @@ export async function POST(request: NextRequest) {
       completed_at: now,
     })
     .eq('id', task_id)
-    .eq('user_id', userId); // safety: users can only update their own tasks
+    .eq('user_id', userId) // safety: users can only update their own tasks
+    .select('id');
 
   if (dbErr) {
     console.error('[Plugin/result] DB error:', dbErr.message);
     return NextResponse.json({ error: 'DB error' }, { status: 500 });
+  }
+
+  if (!updatedRows || updatedRows.length === 0) {
+    console.warn('[Plugin/result] Task not found for result', { taskId: task_id, userId });
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 });
   }
 
   console.log(`[Plugin/result] task=${task_id} status=${status} user=${userId}`);
