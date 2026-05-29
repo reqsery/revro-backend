@@ -52,6 +52,7 @@ interface BuildPlan {
 interface BuildResult {
   rolesCreated: string[];
   rolesReused: string[];
+  rolesUpdated: string[];
   categoriesCreated: string[];
   categoriesReused: string[];
   categoriesUpdated: string[];
@@ -134,6 +135,7 @@ const CHANNEL_PERMISSION_MASK = BigInt(1024) | BigInt(2048) | BigInt(8192);
 const MODERATION_PERMISSION_MASK = BigInt(2) | BigInt(4) | BigInt(8192);
 const MEMBER_CHANNEL_PERMISSIONS = BigInt(1024) | BigInt(2048);
 const MODERATOR_CHANNEL_PERMISSIONS = MEMBER_CHANNEL_PERMISSIONS | BigInt(8192);
+const ADMINISTRATOR_PERMISSION = BigInt(8);
 
 function getChannelPermissionBits(value: string | undefined): string {
   try {
@@ -145,8 +147,7 @@ function getChannelPermissionBits(value: string | undefined): string {
 
 function normalizeRolePermissions(value: string | undefined): string {
   try {
-    const permissions = BigInt(value ?? '0');
-    if ((permissions & BigInt(8)) === BigInt(8)) return String(permissions);
+    const permissions = BigInt(value ?? '0') & ~ADMINISTRATOR_PERMISSION;
     if ((permissions & MODERATION_PERMISSION_MASK) !== BigInt(0)) {
       return String(permissions | MODERATOR_CHANNEL_PERMISSIONS);
     }
@@ -210,6 +211,7 @@ function successfulOperationCount(result: BuildResult): number {
   return [
     result.rolesCreated,
     result.rolesReused,
+    result.rolesUpdated,
     result.categoriesCreated,
     result.categoriesReused,
     result.categoriesUpdated,
@@ -309,6 +311,7 @@ export async function POST(request: NextRequest) {
   const result: BuildResult = {
     rolesCreated: [],
     rolesReused: [],
+    rolesUpdated: [],
     categoriesCreated: [],
     categoriesReused: [],
     categoriesUpdated: [],
@@ -369,10 +372,22 @@ export async function POST(request: NextRequest) {
       const permissions = normalizeRolePermissions(role.permissions);
       const existingRole = existingRoles.find(item => normalizeName(item.name) === normalizeName(role.name));
       if (existingRole) {
+        const patch: Record<string, unknown> = {};
+        if (existingRole.permissions !== permissions) patch.permissions = permissions;
+        if (role.color !== undefined) patch.color = role.color;
+        if (role.hoist !== undefined) patch.hoist = role.hoist;
+        if (role.mentionable !== undefined) patch.mentionable = role.mentionable;
+        if (Object.keys(patch).length > 0) {
+          await discordRequest('PATCH', `/guilds/${guildId}/roles/${existingRole.id}`, patch);
+          existingRole.permissions = permissions;
+          result.rolesUpdated.push(existingRole.name);
+          recordBuildStep('update_role', existingRole.name);
+          await sleep(125);
+        }
         createdRoles.push({
           id: existingRole.id,
           name: existingRole.name,
-          permissions: normalizeRolePermissions(existingRole.permissions || permissions),
+          permissions,
         });
         result.rolesReused.push(existingRole.name);
         recordBuildStep('reuse_role', existingRole.name);
