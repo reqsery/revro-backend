@@ -12,6 +12,7 @@ const VALID_TASK_TYPES = [
   'INSERT_INSTANCE',
   'CREATE_FOLDER',
   'CREATE_REMOTE_EVENT',
+  'CREATE_REMOTE_FUNCTION',
   'CREATE_MODULE_SCRIPT',
   'APPLY_PROPERTIES',
   'READ_EXPLORER',
@@ -49,12 +50,31 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const normalizedData = data && typeof data === 'object' && !Array.isArray(data)
+    ? { ...(data as Record<string, unknown>) }
+    : {};
+
   if (task_type === 'CREATE_MODULE_SCRIPT') {
-    const normalizedData = data && typeof data === 'object' && !Array.isArray(data)
-      ? { ...(data as Record<string, unknown>), script_type: 'ModuleScript' }
-      : { script_type: 'ModuleScript' };
+    normalizedData.code = normalizedData.code ?? normalizedData.content ?? normalizedData.source ?? normalizedData.Source ?? '';
+    normalizedData.script_type = 'ModuleScript';
     task_type = 'INSERT_SCRIPT';
     data = normalizedData;
+  } else if (task_type === 'INSERT_SCRIPT') {
+    normalizedData.code = normalizedData.code ?? normalizedData.content ?? normalizedData.source ?? normalizedData.Source ?? '';
+    normalizedData.script_type = normalizedData.script_type ?? normalizedData.scriptType ?? normalizedData.class_name ?? normalizedData.className;
+    data = normalizedData;
+  } else if (task_type === 'CREATE_UI') {
+    normalizedData.elements = normalizedData.elements ?? normalizedData.children ?? normalizedData.ui ?? normalizedData.components;
+    normalizedData.code = normalizedData.code ?? normalizedData.content ?? normalizedData.source ?? normalizedData.controller_code ?? normalizedData.controllerCode ?? '';
+    data = normalizedData;
+  } else if (task_type === 'CREATE_REMOTE_FUNCTION') {
+    task_type = 'INSERT_INSTANCE';
+    data = {
+      class_name: 'RemoteFunction',
+      parent: normalizedData.parent ?? 'ReplicatedStorage',
+      name: normalizedData.name ?? 'RevroFunction',
+      properties: normalizedData.properties,
+    };
   }
 
   const connection = await getLivePluginConnection(user.id, 'task_route');
