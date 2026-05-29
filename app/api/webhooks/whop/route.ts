@@ -293,6 +293,23 @@ async function addTopup(user: ResolvedUser, membership: WhopMembership, walletUs
   if (error) throw new Error(`DB update failed: ${error.message}`);
 }
 
+async function wasTopupAlreadyApplied(user: ResolvedUser, membership: WhopMembership, walletUsd: number): Promise<boolean> {
+  const membershipId = membership.id ?? '';
+  if (!membershipId) return false;
+
+  const { data, error } = await supabaseAdmin
+    .from('whop_entitlements')
+    .select('revro_user_id, status, wallet_topup_amount')
+    .eq('whop_membership_id', membershipId)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  const status = String(data.status ?? '').toLowerCase();
+  return data.revro_user_id === user.id
+    && Number(data.wallet_topup_amount ?? 0) === walletUsd
+    && (status === 'active' || status === 'claimed');
+}
+
 function purchaseLabel(planProduct: ProductPlan | null, topup: number | null): string {
   if (topup !== null) return `$${topup} AI Wallet top-up`;
   if (planProduct) return `${planProduct.plan} ${planProduct.interval} plan`;
@@ -390,7 +407,10 @@ export async function POST(request: NextRequest) {
       }
     } else if (action === 'membership.renewed' || action === 'payment.succeeded') {
       if (topup !== null) {
-        await addTopup(user!, membership, topup);
+        const alreadyApplied = await wasTopupAlreadyApplied(user!, membership, topup);
+        if (!alreadyApplied) {
+          await addTopup(user!, membership, topup);
+        }
         await upsertWhopEntitlement({
           revroUserId: user!.id,
           membership,
@@ -400,7 +420,11 @@ export async function POST(request: NextRequest) {
           source: user!.source,
           buyerEmail: userEmail,
         });
-        console.log('[Whop] Wallet top-up applied', { userId: user!.id, walletUsd: topup, source: user!.source });
+        console.log(alreadyApplied ? '[Whop] Wallet top-up already applied' : '[Whop] Wallet top-up applied', {
+          userId: user!.id,
+          walletUsd: topup,
+          source: user!.source,
+        });
       } else if (planProduct && planProduct.plan !== 'free') {
         await applyPlan(user!, planProduct, true, membership);
         await upsertWhopEntitlement({

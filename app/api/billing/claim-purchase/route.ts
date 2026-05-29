@@ -81,6 +81,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'This purchase is already linked to another Revro account.' }, { status: 409 });
   }
 
+  if (entitlement.revro_user_id === user.id && String(entitlement.status ?? '').toLowerCase() === 'claimed') {
+    return NextResponse.json({ success: true, already_claimed: true });
+  }
+
   const patchUser: Record<string, unknown> = {
     whop_user_id: entitlement.whop_user_id ?? null,
     whop_membership_id: entitlement.whop_membership_id ?? null,
