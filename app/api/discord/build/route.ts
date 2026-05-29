@@ -265,7 +265,8 @@ export async function POST(request: NextRequest) {
   const guildId: string = body.guild_id ?? '';
   const plan: BuildPlan = body.plan ?? {};
   const previewOnly = body.preview === true;
-  const replaceChannels = body.replace_channels === true;
+  const requestedReplaceChannels = body.replace_channels === true;
+  const replaceChannels = requestedReplaceChannels && body.destructive_confirm === 'DELETE_EXISTING_CHANNELS';
 
   if (!guildId) {
     return NextResponse.json({ error: 'guild_id is required' }, { status: 400 });
@@ -325,8 +326,17 @@ export async function POST(request: NextRequest) {
   };
   const createdRoles: CreatedRole[] = [];
 
+  if (requestedReplaceChannels && !replaceChannels) {
+    const detail = 'Destructive replace ignored: explicit confirmation missing. Safe mode will only create, reuse, and update resources.';
+    result.skipped.push(detail);
+    console.warn('[Discord build] Destructive replace ignored without explicit confirmation', {
+      userId: user.id,
+      guildId,
+    });
+  }
+
   // Replacing channels is destructive, so it only runs after an explicit
-  // preview + confirmation from the frontend. Delete children before categories.
+  // confirmation token from the frontend. Safe mode must never delete channels.
   if (replaceChannels) {
     try {
       const guild: DiscordGuildState = await discordRequest('GET', `/guilds/${guildId}`);
