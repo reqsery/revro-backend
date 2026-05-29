@@ -102,6 +102,10 @@ async function applyPlan(
 }
 
 async function downgradeToFree(userId: string): Promise<void> {
+  const now = new Date();
+  const billingCycleEnd = new Date(now);
+  billingCycleEnd.setUTCMonth(billingCycleEnd.getUTCMonth() + 1);
+
   const { error } = await supabaseAdmin
     .from('users')
     .update({
@@ -110,9 +114,9 @@ async function downgradeToFree(userId: string): Promise<void> {
         credits_used:         0,
         monthly_wallet_balance: PLAN_CONFIG.free.wallet_monthly_usd,
         images_generated:     0,
-        billing_cycle_start:  new Date().toISOString(),
-        billing_cycle_end:    null,
-        updated_at:           new Date().toISOString(),
+        billing_cycle_start:  now.toISOString(),
+        billing_cycle_end:    billingCycleEnd.toISOString(),
+        updated_at:           now.toISOString(),
       })
     .eq('id', userId);
 

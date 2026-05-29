@@ -56,6 +56,12 @@ function getCycleEnd(interval: ProductPlan['interval']): string {
   return end.toISOString();
 }
 
+function getNextMonthlyCycleEnd(): string {
+  const end = new Date();
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  return end.toISOString();
+}
+
 function productIdFor(membership: WhopMembership): string {
   return membership.plan_id ?? membership.product_id ?? '';
 }
@@ -268,7 +274,7 @@ async function downgradeToFree(user: ResolvedUser, membership: WhopMembership): 
     monthly_wallet_balance: PLAN_CONFIG.free.wallet_monthly_usd,
     images_generated: 0,
     billing_cycle_start: now,
-    billing_cycle_end: null,
+    billing_cycle_end: getNextMonthlyCycleEnd(),
     whop_membership_id: membership.id ?? null,
     whop_product_id: membership.product_id ?? null,
     whop_plan_id: membership.plan_id ?? null,
