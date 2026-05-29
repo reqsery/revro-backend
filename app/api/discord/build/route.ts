@@ -20,6 +20,7 @@ interface DiscordRole {
 interface DiscordChannel {
   name: string;
   type: 'text' | 'voice' | 'announcement' | 'forum';
+  emoji?: string;
   topic?: string;
   allowed_roles?: string[];
   denied_roles?: string[];
@@ -28,6 +29,7 @@ interface DiscordChannel {
 
 interface DiscordCategory {
   name: string;
+  emoji?: string;
   channels: DiscordChannel[];
 }
 
@@ -122,7 +124,13 @@ async function discordRequest(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const message = (err as any)?.message ?? `Discord API error ${res.status}`;
-    throw new Error(message);
+    console.error('[Discord API] Validation error', {
+      method,
+      path,
+      status: res.status,
+      body: err,
+    });
+    throw new Error(`${message}: ${JSON.stringify(err)}`);
   }
 
   if (res.status === 204) return null;
@@ -224,8 +232,8 @@ function successfulOperationCount(result: BuildResult): number {
 
 function getChannelType(channel: DiscordChannel): number {
   if (channel.type === 'voice') return 2; // GUILD_VOICE
-  if (channel.type === 'announcement') return 5; // GUILD_ANNOUNCEMENT
-  if (channel.type === 'forum') return 15; // GUILD_FORUM
+  // Safe mode defaults every non-voice channel to normal text. Announcement,
+  // forum, rules, and community channel types can fail on guild feature gates.
   return 0; // GUILD_TEXT
 }
 
@@ -235,6 +243,26 @@ function normalizeName(name: string): string {
 
 function normalizeChannelName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function channelEmoji(channel: DiscordChannel): string {
+  if (channel.emoji?.trim()) return channel.emoji.trim();
+  const normalized = normalizeName(channel.name);
+  if (normalized.includes('announcement') || normalized.includes('update') || normalized.includes('news')) return '📢';
+  if (normalized.includes('rule')) return '📜';
+  if (normalized.includes('general') || normalized.includes('chat')) return '💬';
+  if (normalized.includes('support') || normalized.includes('ticket')) return '🎫';
+  if (normalized.includes('vip') || normalized.includes('premium')) return '🏆';
+  if (normalized.includes('voice')) return '🔊';
+  if (normalized.includes('faq') || normalized.includes('help')) return '❓';
+  if (normalized.includes('suggest')) return '💡';
+  if (normalized.includes('welcome')) return '👋';
+  return '•';
+}
+
+function displayChannelName(channel: DiscordChannel): string {
+  const base = normalizeChannelName(channel.name).replace(/^[^\w]+[・|-]?/, '');
+  return `${channelEmoji(channel)}・${base}`;
 }
 
 function getUniqueChannelName(name: string, existingNames: Set<string>): string {
@@ -473,21 +501,41 @@ export async function POST(request: NextRequest) {
     for (const channel of (category.channels ?? [])) {
       try {
         const channelType = getChannelType(channel);
-        const desiredChannelName = normalizeChannelName(channel.name);
+        const desiredChannelName = displayChannelName(channel);
+        const plainChannelName = normalizeChannelName(channel.name);
         const reusableChannel = existingChannels.find(item =>
           item.type === channelType
           && item.parent_id === categoryId
-          && normalizeName(item.name) === normalizeName(desiredChannelName)
+          && (
+            normalizeName(item.name) === normalizeName(desiredChannelName)
+            || normalizeName(item.name) === normalizeName(plainChannelName)
+          )
         );
         if (reusableChannel) {
-          const reusedName = `${category.name}/${channel.type === 'voice' ? '' : '#'}${reusableChannel.name}`;
+          const reusedName = `${category.name}/${channelType === 2 ? '' : '#'}${reusableChannel.name}`;
           result.channelsReused.push(reusedName);
           recordBuildStep('reuse_channel', reusedName);
           try {
-            await discordRequest('PATCH', `/channels/${reusableChannel.id}`, {
+            const patchBody = {
+              name: desiredChannelName,
               permission_overwrites: buildChannelOverwrites(guildId, createdRoles, channel),
-              ...(channel.topic && channelType !== 2 ? { topic: channel.topic } : {}),
-            });
+              ...(channel.topic && channelType !== 2 ? { topic: channel.topic.slice(0, 1024) } : {}),
+            };
+            try {
+              await discordRequest('PATCH', `/channels/${reusableChannel.id}`, patchBody);
+            } catch (err) {
+              console.warn('[Discord build] Decorated channel update failed, retrying plain text channel', {
+                channel: channel.name,
+                error: err instanceof Error ? err.message : String(err),
+              });
+              await discordRequest('PATCH', `/channels/${reusableChannel.id}`, {
+                name: plainChannelName,
+                permission_overwrites: buildChannelOverwrites(guildId, createdRoles, channel),
+                ...(channel.topic && channelType !== 2 ? { topic: channel.topic.slice(0, 1024) } : {}),
+              });
+              reusableChannel.name = plainChannelName;
+            }
+            if (reusableChannel.name !== plainChannelName) reusableChannel.name = desiredChannelName;
             result.channelsUpdated.push(reusedName);
             recordBuildStep('update_channel', reusedName);
             await sleep(125);
@@ -499,15 +547,31 @@ export async function POST(request: NextRequest) {
 
         const existingNames = new Set(existingChannels.map(item => normalizeName(item.name)));
         const channelName = getUniqueChannelName(desiredChannelName, existingNames);
-        const created = await discordRequest('POST', `/guilds/${guildId}/channels`, {
-          name: channelName,
-          type: channelType,
-          parent_id: categoryId,
-          permission_overwrites: buildChannelOverwrites(guildId, createdRoles, channel),
-          ...(channel.topic && channelType !== 2 ? { topic: channel.topic } : {}),
-        });
+        let created: ExistingChannel;
+        try {
+          created = await discordRequest('POST', `/guilds/${guildId}/channels`, {
+            name: channelName,
+            type: channelType,
+            parent_id: categoryId,
+            permission_overwrites: buildChannelOverwrites(guildId, createdRoles, channel),
+            ...(channel.topic && channelType !== 2 ? { topic: channel.topic.slice(0, 1024) } : {}),
+          });
+        } catch (err) {
+          console.warn('[Discord build] Decorated channel create failed, retrying plain text channel', {
+            channel: channel.name,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          const fallbackName = getUniqueChannelName(plainChannelName, existingNames);
+          created = await discordRequest('POST', `/guilds/${guildId}/channels`, {
+            name: fallbackName,
+            type: channelType,
+            parent_id: categoryId,
+            permission_overwrites: buildChannelOverwrites(guildId, createdRoles, channel),
+            ...(channel.topic && channelType !== 2 ? { topic: channel.topic.slice(0, 1024) } : {}),
+          });
+        }
         existingChannels.push(created);
-        const createdName = `${category.name}/${channel.type === 'voice' ? '' : '#'}${channelName}`;
+        const createdName = `${category.name}/${channelType === 2 ? '' : '#'}${created.name ?? channelName}`;
         result.channelsCreated.push(createdName);
         recordBuildStep('create_channel', createdName);
         await sleep(125);

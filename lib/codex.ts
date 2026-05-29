@@ -113,7 +113,7 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
       "emoji": "📢",
       "channels": [
         { "name": "rules", "type": "text", "emoji": "📌", "topic": "Server rules and guidelines" },
-        { "name": "announcements", "type": "announcement", "emoji": "📣", "topic": "Important announcements" }
+        { "name": "announcements", "type": "text", "emoji": "📢", "topic": "Important announcements" }
       ]
     },
     {
@@ -121,7 +121,7 @@ When the user asks you to set up, create, or plan a Discord server, you MUST res
       "emoji": "💬",
       "channels": [
         { "name": "general", "type": "text", "emoji": "💬", "topic": "General chat" },
-        { "name": "community-help", "type": "forum", "emoji": "🧵", "topic": "Questions and help threads" },
+        { "name": "community-help", "type": "text", "emoji": "❓", "topic": "Questions and help threads" },
         { "name": "voice-chat", "type": "voice", "emoji": "🔊" }
       ]
     }
@@ -139,15 +139,14 @@ Rules for the JSON:
 - Each role MUST have an appropriate emoji field that visually represents the role
 - Each channel MUST have an appropriate emoji field that visually represents the channel's purpose
 - Each category MUST have an appropriate emoji field that visually represents the category's theme
-- Channel type is "text", "voice", "announcement", or "forum"
+- Channel type is "text" or "voice". Use normal text channels for announcements, rules, forums, support, tickets, patch notes, and community channels.
 - For private/paywalled channels, add "allowed_roles": ["Exact Role Name"] on the channel. The builder will deny @everyone and allow those roles.
 - For channels a role must not see, add "denied_roles": ["Exact Role Name"].
 - For read-only channels, add "read_only": true. The builder will deny Send Messages while keeping View Channel.
 - Do not promise channel-level access, paywalls, or read-only behavior unless the matching allowed_roles, denied_roles, or read_only fields are in the JSON.
 - Do not use marketing phrases like "meticulously structured", "complete blueprint", or "ready for deployment" unless the JSON is valid and contains the requested roles, permissions, categories, and channels.
-- Use "announcement" when the user asks for announcements, updates, news, patch notes, or broadcast channels
-- Use "forum" when the user asks for forums, help threads, suggestions, bug reports, showcase posts, or discussion topics that should be separate posts
-- Category and channel names should be lowercase with hyphens (Discord style)
+- Do not use special Discord channel types like "announcement" or "forum"; the builder creates safe normal text channels instead.
+- Category and channel names should be lowercase with hyphens (Discord style). Add emoji fields; the builder renders channels like "📢・announcements", "📜・rules", "💬・general", "🎫・support", "🏆・vip".
 - Include 3-8 roles and 3-6 categories with 2-5 channels each
 - Always include a general text channel and at least one voice channel
 
