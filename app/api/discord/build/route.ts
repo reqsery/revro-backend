@@ -54,8 +54,10 @@ interface BuildResult {
   rolesReused: string[];
   categoriesCreated: string[];
   categoriesReused: string[];
+  categoriesUpdated: string[];
   channelsCreated: string[];
   channelsReused: string[];
+  channelsUpdated: string[];
   channelsDeleted: string[];
   skipped: string[];
   failed: string[];
@@ -210,8 +212,10 @@ function successfulOperationCount(result: BuildResult): number {
     result.rolesReused,
     result.categoriesCreated,
     result.categoriesReused,
+    result.categoriesUpdated,
     result.channelsCreated,
     result.channelsReused,
+    result.channelsUpdated,
     result.channelsDeleted,
   ].reduce((count, items) => count + items.length, 0);
 }
@@ -307,8 +311,10 @@ export async function POST(request: NextRequest) {
     rolesReused: [],
     categoriesCreated: [],
     categoriesReused: [],
+    categoriesUpdated: [],
     channelsCreated: [],
     channelsReused: [],
+    channelsUpdated: [],
     channelsDeleted: [],
     skipped: [],
     failed: [],
@@ -408,6 +414,16 @@ export async function POST(request: NextRequest) {
       categoryId = existingCategory.id;
       result.categoriesReused.push(category.name);
       recordBuildStep('reuse_category', category.name);
+      try {
+        await discordRequest('PATCH', `/channels/${existingCategory.id}`, {
+          permission_overwrites: permissionOverwrites,
+        });
+        result.categoriesUpdated.push(category.name);
+        recordBuildStep('update_category_permissions', category.name);
+        await sleep(125);
+      } catch (err) {
+        recordBuildError(result, `Update category "${category.name}" permissions`, err);
+      }
     } else {
       try {
         const existingNames = new Set(existingChannels.map(channel => normalizeName(channel.name)));
@@ -442,6 +458,17 @@ export async function POST(request: NextRequest) {
           const reusedName = `${category.name}/${channel.type === 'voice' ? '' : '#'}${reusableChannel.name}`;
           result.channelsReused.push(reusedName);
           recordBuildStep('reuse_channel', reusedName);
+          try {
+            await discordRequest('PATCH', `/channels/${reusableChannel.id}`, {
+              permission_overwrites: buildChannelOverwrites(guildId, createdRoles, channel),
+              ...(channel.topic && channelType !== 2 ? { topic: channel.topic } : {}),
+            });
+            result.channelsUpdated.push(reusedName);
+            recordBuildStep('update_channel', reusedName);
+            await sleep(125);
+          } catch (err) {
+            recordBuildError(result, `Update channel "${channel.name}"`, err);
+          }
           continue;
         }
 
