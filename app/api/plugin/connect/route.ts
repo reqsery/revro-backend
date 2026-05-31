@@ -4,7 +4,7 @@ import { getPluginApiKey, getUserIdByPluginApiKey } from '@/lib/plugin-auth';
 import { randomUUID } from 'crypto';
 
 export const dynamic = 'force-dynamic';
-const LATEST_PLUGIN_VERSION = '1.1.2';
+const LATEST_PLUGIN_VERSION = '1.1.3';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
