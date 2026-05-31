@@ -23,6 +23,23 @@ const VALID_TASK_TYPES = [
   'APPLY_IMAGE',
 ] as const;
 
+function normalizeUiChildren(value: unknown, path = 'data.elements'): unknown {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid Studio task CREATE_UI: ${path} must be an array.`);
+  }
+  return value.map((child, index) => {
+    const childPath = `${path}[${index}]`;
+    if (!child || typeof child !== 'object' || Array.isArray(child)) {
+      throw new Error(`Invalid Studio task CREATE_UI: ${childPath} must be an object.`);
+    }
+    const normalized = { ...(child as Record<string, unknown>) };
+    normalized.class_name = normalized.class_name ?? normalized.className;
+    normalized.children = normalizeUiChildren(normalized.children ?? normalized.elements, `${childPath}.children`);
+    return normalized;
+  });
+}
+
 // ── POST /api/plugin/task ─────────────────────────────────────────────────────
 // Called by the Revro frontend/AI to queue a task for the Roblox Studio plugin.
 // The plugin will pick it up on its next poll (/api/plugin/poll).
@@ -34,14 +51,15 @@ export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
 
-  let body: { task_type?: string; data?: unknown };
+  let body: { task_type?: string; type?: string; data?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  let { task_type, data } = body;
+  let task_type = body.task_type ?? body.type;
+  let { data } = body;
 
   if (!task_type || !(VALID_TASK_TYPES as readonly string[]).includes(task_type)) {
     return NextResponse.json(
@@ -53,19 +71,28 @@ export async function POST(request: NextRequest) {
   const normalizedData = data && typeof data === 'object' && !Array.isArray(data)
     ? { ...(data as Record<string, unknown>) }
     : {};
+  normalizedData.class_name = normalizedData.class_name ?? normalizedData.className;
+  normalizedData.script_type = normalizedData.script_type ?? normalizedData.scriptType;
+  normalizedData.code = normalizedData.code ?? normalizedData.content ?? normalizedData.source ?? normalizedData.Source;
+  normalizedData.elements = normalizedData.elements ?? normalizedData.children ?? normalizedData.ui ?? normalizedData.components;
 
   if (task_type === 'CREATE_MODULE_SCRIPT') {
-    normalizedData.code = normalizedData.code ?? normalizedData.content ?? normalizedData.source ?? normalizedData.Source ?? '';
     normalizedData.script_type = 'ModuleScript';
     task_type = 'INSERT_SCRIPT';
     data = normalizedData;
   } else if (task_type === 'INSERT_SCRIPT') {
-    normalizedData.code = normalizedData.code ?? normalizedData.content ?? normalizedData.source ?? normalizedData.Source ?? '';
-    normalizedData.script_type = normalizedData.script_type ?? normalizedData.scriptType ?? normalizedData.class_name ?? normalizedData.className;
+    normalizedData.script_type = normalizedData.script_type ?? normalizedData.class_name;
     data = normalizedData;
   } else if (task_type === 'CREATE_UI') {
-    normalizedData.elements = normalizedData.elements ?? normalizedData.children ?? normalizedData.ui ?? normalizedData.components;
-    normalizedData.code = normalizedData.code ?? normalizedData.content ?? normalizedData.source ?? normalizedData.controller_code ?? normalizedData.controllerCode ?? '';
+    try {
+      normalizedData.elements = normalizeUiChildren(normalizedData.elements);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Invalid Studio task CREATE_UI payload.' },
+        { status: 400 },
+      );
+    }
+    normalizedData.code = normalizedData.code ?? normalizedData.controller_code ?? normalizedData.controllerCode;
     data = normalizedData;
   } else if (task_type === 'CREATE_REMOTE_FUNCTION') {
     task_type = 'INSERT_INSTANCE';
@@ -75,6 +102,15 @@ export async function POST(request: NextRequest) {
       name: normalizedData.name ?? 'RevroFunction',
       properties: normalizedData.properties,
     };
+  } else {
+    data = normalizedData;
+  }
+
+  if (task_type === 'INSERT_SCRIPT' && (typeof normalizedData.code !== 'string' || !normalizedData.code.trim())) {
+    return NextResponse.json(
+      { error: 'Invalid Studio task INSERT_SCRIPT: script Source code is required (accepted fields: code, content, source, Source).' },
+      { status: 400 },
+    );
   }
 
   const connection = await getLivePluginConnection(user.id, 'task_route');
