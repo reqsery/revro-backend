@@ -3,7 +3,7 @@ import { requireAuth } from '@/lib/auth';
 import { getLivePluginConnection } from '@/lib/plugin-connection';
 
 export const dynamic = 'force-dynamic';
-const LATEST_PLUGIN_VERSION = '1.1.4';
+const LATEST_PLUGIN_VERSION = '1.1.5';
 
 // ── GET /api/plugin/status ────────────────────────────────────────────────────
 // Frontend calls this to check whether the user's Roblox Studio plugin

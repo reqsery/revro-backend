@@ -341,7 +341,7 @@ Send a task to the Roblox Studio plugin.
 - `CREATE_MODULE_SCRIPT` - Compatibility alias for a ModuleScript insert
 - `APPLY_PROPERTIES` - Apply properties to an existing instance
 - `READ_EXPLORER` - Read Studio explorer tree
-- `START_PLAYTEST` - Start playtest
+- `START_PLAYTEST` - Compatibility-only task; currently returns a clean beta-unavailable error
 - `STOP_PLAYTEST` - Stop playtest
 - `READ_OUTPUT` - Read recent Studio output logs
 - `AUTO_PLAYTEST` - Auto playtest with checks

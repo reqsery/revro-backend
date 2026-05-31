@@ -83,10 +83,11 @@ Supported Studio task types include:
 - `CREATE_MODULE_SCRIPT`
 - `APPLY_PROPERTIES`
 - `READ_EXPLORER`
-- `START_PLAYTEST`
-- `STOP_PLAYTEST`
 - `READ_OUTPUT`
 - `APPLY_IMAGE`
+
+Automated playtest remains beta and is disabled in the product UI. Users should
+use Studio's own Play controls until the workflow is proven reliable.
 
 Generated image previews can be published through the authenticated
 `/api/roblox/assets/upload` route when Roblox Open Cloud asset upload is
