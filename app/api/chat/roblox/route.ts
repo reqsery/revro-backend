@@ -257,6 +257,192 @@ async function saveMessages(
   return { convId, messageId };
 }
 
+type CollectedAIResponse = {
+  content: string;
+  inputTokens: number;
+  outputTokens: number;
+};
+
+async function collectAIResponse(
+  selection: Parameters<typeof streamAI>[0],
+  prompt: string,
+  history: any[],
+  isCancelled: () => boolean,
+): Promise<CollectedAIResponse> {
+  let content = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  for await (const chunk of streamAI(selection, prompt, 'roblox', history)) {
+    if (isCancelled()) break;
+    if (chunk.type === 'message_start') {
+      inputTokens = chunk.message?.usage?.input_tokens ?? 0;
+    } else if (chunk.type === 'message_delta') {
+      inputTokens = chunk.usage?.input_tokens || inputTokens;
+      outputTokens = chunk.usage?.output_tokens ?? 0;
+    } else if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+      content += chunk.delta.text;
+    }
+  }
+
+  return { content, inputTokens, outputTokens };
+}
+
+function expectsStudioAssembly(type: string, prompt: string): boolean {
+  return type === 'ui_component'
+    || /\b(system|script|module|leaderstats|remote\s*event|remoteevent|coin|pickup|counter|shop|inventory|rebirth|simulator|ui|gui|image|icon)\b/i.test(prompt);
+}
+
+function studioAssemblyIssue(content: string, type: string, prompt: string): string | null {
+  if (!content.trim()) return 'empty_text';
+  if (expectsStudioAssembly(type, prompt) && !/"revro_studio_tasks"\s*:/i.test(content)) {
+    return 'missing_studio_manifest';
+  }
+  return null;
+}
+
+function strictStudioRetryPrompt(prompt: string): string {
+  return `Create a Roblox Studio-ready result for this request:
+${prompt}
+
+Your previous result was empty or missing the required Studio assembly.
+Return a short visible summary, then a JSON code block with a non-empty "revro_studio_tasks" array.
+Include every needed folder, remote, server/client script, module, and CREATE_UI task.
+Scripts must include complete Luau source in "code". UI tasks must include visible children with Size, Position, Text, and colors.
+Do not return a tutorial. Do not return an empty response.`;
+}
+
+function studioAssemblyResponse(summary: string, tasks: any[]): string {
+  return `${summary}
+
+\`\`\`json
+${JSON.stringify({ revro_studio_tasks: tasks }, null, 2)}
+\`\`\``;
+}
+
+function coinPickupFallback(): string {
+  const serverCode = `local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local remote = ReplicatedStorage:WaitForChild("RevroCoinSystem"):WaitForChild("Remotes"):WaitForChild("CoinsUpdated")
+
+local function setupPlayer(player)
+    local leaderstats = player:FindFirstChild("leaderstats") or Instance.new("Folder")
+    leaderstats.Name = "leaderstats"
+    leaderstats.Parent = player
+    local coins = leaderstats:FindFirstChild("Coins") or Instance.new("IntValue")
+    coins.Name = "Coins"
+    coins.Parent = leaderstats
+end
+
+local function connectPickup(part)
+    if not part:IsA("BasePart") or part:GetAttribute("RevroCoinConnected") then return end
+    part:SetAttribute("RevroCoinConnected", true)
+    part.Touched:Connect(function(hit)
+        local player = Players:GetPlayerFromCharacter(hit.Parent)
+        local coins = player and player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Coins")
+        if not coins or not part.CanTouch then return end
+        part.CanTouch = false
+        coins.Value += part:GetAttribute("CoinValue") or 1
+        remote:FireClient(player, coins.Value)
+        part:Destroy()
+    end)
+end
+
+Players.PlayerAdded:Connect(setupPlayer)
+for _, player in Players:GetPlayers() do setupPlayer(player) end
+for _, child in workspace:GetDescendants() do
+    if child.Name == "CoinPickup" then connectPickup(child) end
+end
+workspace.DescendantAdded:Connect(function(child)
+    if child.Name == "CoinPickup" then connectPickup(child) end
+end)`;
+  const clientCode = `local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local player = Players.LocalPlayer
+local label = script.Parent:WaitForChild("Counter")
+local remote = ReplicatedStorage:WaitForChild("RevroCoinSystem"):WaitForChild("Remotes"):WaitForChild("CoinsUpdated")
+
+local function render(value)
+    label.Text = "Coins: " .. tostring(value)
+end
+
+remote.OnClientEvent:Connect(render)
+local coins = player:WaitForChild("leaderstats"):WaitForChild("Coins")
+render(coins.Value)
+coins.Changed:Connect(render)`;
+
+  return studioAssemblyResponse(
+    'Prepared a Studio-ready coin pickup system with leaderstats Coins, a RemoteEvent, a server pickup script, and a visible UI counter.',
+    [
+      { type: 'CREATE_FOLDER', data: { name: 'RevroCoinSystem', parent: 'ReplicatedStorage' } },
+      { type: 'CREATE_FOLDER', data: { name: 'Remotes', parent: 'ReplicatedStorage.RevroCoinSystem' } },
+      { type: 'CREATE_REMOTE_EVENT', data: { name: 'CoinsUpdated', parent: 'ReplicatedStorage.RevroCoinSystem.Remotes' } },
+      { type: 'INSERT_SCRIPT', data: { name: 'CoinPickupServer', parent: 'ServerScriptService', scriptType: 'Script', code: serverCode } },
+      {
+        type: 'CREATE_UI',
+        data: {
+          name: 'CoinCounterGui',
+          parent: 'StarterGui',
+          children: [{
+            className: 'TextLabel',
+            name: 'Counter',
+            properties: {
+              Size: '{0, 220}, {0, 56}',
+              Position: '{0, 24}, {0, 24}',
+              BackgroundColor3: 'Color3.fromRGB(20, 24, 34)',
+              TextColor3: 'Color3.fromRGB(255, 221, 64)',
+              Text: 'Coins: 0',
+              TextScaled: true,
+            },
+          }],
+          code: clientCode,
+        },
+      },
+    ],
+  );
+}
+
+function imageUiFallback(): string {
+  return studioAssemblyResponse(
+    'Prepared a StarterGui image UI with an easy-to-replace placeholder. Roblox asset upload is not implemented yet: upload your generated image to Roblox, then replace REPLACE_WITH_ROBLOX_ASSET_ID with the resulting asset ID.',
+    [{
+      type: 'CREATE_UI',
+      data: {
+        name: 'GeneratedAssetGui',
+        parent: 'StarterGui',
+        children: [{
+          className: 'ImageButton',
+          name: 'GeneratedAssetButton',
+          properties: {
+            Size: '{0, 160}, {0, 160}',
+            Position: '{0.5, -80}, {0.5, -80}',
+            BackgroundTransparency: 1,
+            Image: 'rbxassetid://REPLACE_WITH_ROBLOX_ASSET_ID',
+          },
+        }],
+      },
+    }],
+  );
+}
+
+function genericStudioFallback(prompt: string): string {
+  if (/\b(coin|leaderstats|pickup|counter)\b/i.test(prompt)) return coinPickupFallback();
+  if (/\b(image|icon|asset|ui|gui|shop)\b/i.test(prompt)) return imageUiFallback();
+
+  return studioAssemblyResponse(
+    'Prepared a Studio-ready starter script so the requested Roblox workflow can be inserted and extended safely.',
+    [{
+      type: 'INSERT_SCRIPT',
+      data: {
+        name: 'RevroGeneratedSystem',
+        parent: 'ServerScriptService',
+        scriptType: 'Script',
+        code: `-- Revro fallback assembly\n-- Requested system: ${prompt.replace(/\r?\n/g, ' ').slice(0, 180)}\nwarn("Revro starter system inserted. Continue refining this system in Revro chat.")`,
+      },
+    }],
+  );
+}
+
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -386,7 +572,7 @@ export async function POST(request: NextRequest) {
         user.id,
         conversationId,
         prompt || prompts.map(item => item.prompt).join('\n\n'),
-        `Generated ${prompts.length} Roblox image asset${prompts.length === 1 ? '' : 's'}.`,
+        `Generated ${prompts.length} Roblox image preview${prompts.length === 1 ? '' : 's'}. Roblox asset upload is not implemented yet; upload the image to Roblox and replace placeholder rbxassetid values before inserting it into a Studio UI.`,
         planModel,
         cost,
       );
@@ -405,7 +591,7 @@ export async function POST(request: NextRequest) {
           image_url: imageUrls[0],
           image_urls: imageUrls,
           image_count: imageUrls.length,
-          explanation: `Generated ${imageUrls.length} Roblox image asset${imageUrls.length === 1 ? '' : 's'}.`,
+          explanation: `Generated ${imageUrls.length} Roblox image preview${imageUrls.length === 1 ? '' : 's'}. Roblox asset upload is not implemented yet; upload the image to Roblox and replace placeholder rbxassetid values before inserting it into a Studio UI.`,
           credits_used: cost,
           credits_remaining: creditResult.creditsRemaining,
         },
@@ -435,6 +621,8 @@ export async function POST(request: NextRequest) {
         let fullContent  = '';
         let inputTokens  = 0;
         let outputTokens = 0;
+        let responseSource: 'provider' | 'retry' | 'fallback' = 'provider';
+        let emptyResponseCause: string | null = null;
 
         try {
           console.info('[AI route]', {
@@ -445,27 +633,10 @@ export async function POST(request: NextRequest) {
             ...getAIRoutingDebug('roblox', prompt, planModel),
             inputTokenEstimate: estimateInputTokens(prompt, history),
           });
-          const aiStream = streamAI(selection, prompt, 'roblox', history);
-
-          for await (const chunk of aiStream) {
-            // Stop if client disconnected — don't charge
-            if (clientCancelled) break;
-
-            if (chunk.type === 'message_start') {
-              inputTokens = chunk.message?.usage?.input_tokens ?? 0;
-            } else if (chunk.type === 'message_delta') {
-              inputTokens = chunk.usage?.input_tokens || inputTokens;
-              outputTokens = chunk.usage?.output_tokens ?? 0;
-            } else if (
-              chunk.type === 'content_block_delta' &&
-              chunk.delta.type === 'text_delta'
-            ) {
-              fullContent += chunk.delta.text;
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'delta', text: chunk.delta.text })}\n\n`)
-              );
-            }
-          }
+          const firstResponse = await collectAIResponse(selection, prompt, history, () => clientCancelled);
+          fullContent = firstResponse.content;
+          inputTokens = firstResponse.inputTokens;
+          outputTokens = firstResponse.outputTokens;
 
           // Client cancelled mid-stream — don't charge, don't save
           if (clientCancelled) {
@@ -474,8 +645,65 @@ export async function POST(request: NextRequest) {
           }
 
           // Calculate token-based cost
+          emptyResponseCause = studioAssemblyIssue(fullContent, type, prompt);
+          if (emptyResponseCause) {
+            console.warn('[Roblox stream] Empty or incomplete response', {
+              route: 'roblox_stream',
+              provider: selection.provider,
+              model: selection.actualModel,
+              selectedModelTier: planModel,
+              cause: emptyResponseCause,
+              attempt: 1,
+              inputTokens,
+              outputTokens,
+              userId: user.id,
+            });
+
+            try {
+              const retryResponse = await callAI(selection, strictStudioRetryPrompt(prompt), 'roblox', history);
+              fullContent = retryResponse.content;
+              inputTokens = retryResponse.usage?.input_tokens ?? 0;
+              outputTokens = retryResponse.usage?.output_tokens ?? 0;
+              responseSource = 'retry';
+              emptyResponseCause = studioAssemblyIssue(fullContent, type, prompt);
+            } catch (retryError: any) {
+              emptyResponseCause = `retry_error:${retryError.message}`;
+              console.error('[Roblox stream] Strict retry failed', {
+                route: 'roblox_stream',
+                provider: selection.provider,
+                model: selection.actualModel,
+                cause: emptyResponseCause,
+                userId: user.id,
+              });
+            }
+          }
+
+          if (emptyResponseCause) {
+            fullContent = genericStudioFallback(prompt);
+            inputTokens = 0;
+            outputTokens = 0;
+            responseSource = 'fallback';
+            console.warn('[Roblox stream] Using deterministic Studio fallback', {
+              route: 'roblox_stream',
+              provider: selection.provider,
+              model: selection.actualModel,
+              cause: emptyResponseCause,
+              userId: user.id,
+            });
+          }
+
+          if (!fullContent.trim()) {
+            throw new Error('Roblox generation failed after retry and fallback');
+          }
+
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'delta', text: fullContent })}\n\n`)
+          );
+
           const totalTokens = inputTokens + outputTokens;
-          const tokenCost = estimateTokenCostUsd(selection.actualModel, inputTokens, outputTokens);
+          const tokenCost = responseSource === 'fallback'
+            ? 0
+            : estimateTokenCostUsd(selection.actualModel, inputTokens, outputTokens);
 
           const { convId, messageId } = await saveMessages(
             user.id,
@@ -486,17 +714,22 @@ export async function POST(request: NextRequest) {
             tokenCost,
           );
 
-          const creditResult = await deductCredits(user.id, tokenCost, `${type}_generation`, {
-            model: selection.logicalModel,
-            actualModel: selection.actualModel,
-            provider: selection.provider,
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            total_tokens: totalTokens,
-            image_cost: null,
-            file_context_cost: null,
-            estimated_real_usd_cost: tokenCost,
-          });
+          const creditResult = tokenCost > 0
+            ? await deductCredits(user.id, tokenCost, `${type}_generation`, {
+                model: selection.logicalModel,
+                actualModel: selection.actualModel,
+                provider: selection.provider,
+                input_tokens: inputTokens,
+                output_tokens: outputTokens,
+                total_tokens: totalTokens,
+                image_cost: null,
+                file_context_cost: null,
+                estimated_real_usd_cost: tokenCost,
+              })
+            : {
+                creditsRemaining: Number(creditCheck.monthly_wallet_balance ?? 0)
+                  + Number(creditCheck.extra_wallet_balance ?? 0),
+              };
           console.info('[AI generation]', {
             route: 'roblox_stream',
             provider: selection.provider,
@@ -510,6 +743,8 @@ export async function POST(request: NextRequest) {
             fileContextCost: null,
             estimatedRealUsdCost: tokenCost,
             deductedWalletAmount: tokenCost,
+            responseSource,
+            emptyResponseCause,
             userId: user.id,
           });
 
