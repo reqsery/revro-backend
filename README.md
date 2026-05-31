@@ -86,6 +86,14 @@ Supported Studio task types include:
 - `START_PLAYTEST`
 - `STOP_PLAYTEST`
 - `READ_OUTPUT`
+- `APPLY_IMAGE`
+
+Generated image previews can be published through the authenticated
+`/api/roblox/assets/upload` route when Roblox Open Cloud asset upload is
+configured. The API key stays server-side. Chat displays the returned
+`rbxassetid://...` value and carries it into a later "implement as UI" request.
+If upload is not configured, Revro keeps the preview downloadable and tells the
+user to upload it manually instead of claiming the image is already in Studio.
 
 ## Environment
 
@@ -99,6 +107,11 @@ Production requires:
 - Whop plan/product IDs for Pro, Dev, Studio, annual variants, and top-ups
 - `RESEND_API_KEY`
 - `CRON_SECRET`
+
+Optional Roblox generated-preview upload:
+
+- `ROBLOX_OPEN_CLOUD_API_KEY`
+- `ROBLOX_ASSET_CREATOR_USER_ID` or `ROBLOX_ASSET_CREATOR_GROUP_ID`
 
 Do not commit secret values.
 

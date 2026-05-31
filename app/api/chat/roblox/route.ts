@@ -572,7 +572,7 @@ export async function POST(request: NextRequest) {
         user.id,
         conversationId,
         prompt || prompts.map(item => item.prompt).join('\n\n'),
-        `Generated ${prompts.length} Roblox image preview${prompts.length === 1 ? '' : 's'}. Roblox asset upload is not implemented yet; upload the image to Roblox and replace placeholder rbxassetid values before inserting it into a Studio UI.`,
+        `Generated ${prompts.length} Roblox image preview${prompts.length === 1 ? '' : 's'}. Publish the preview to Roblox before inserting it into a Studio UI. If automatic Roblox upload is not configured, download it and upload it manually.`,
         planModel,
         cost,
       );
@@ -591,7 +591,7 @@ export async function POST(request: NextRequest) {
           image_url: imageUrls[0],
           image_urls: imageUrls,
           image_count: imageUrls.length,
-          explanation: `Generated ${imageUrls.length} Roblox image preview${imageUrls.length === 1 ? '' : 's'}. Roblox asset upload is not implemented yet; upload the image to Roblox and replace placeholder rbxassetid values before inserting it into a Studio UI.`,
+          explanation: `Generated ${imageUrls.length} Roblox image preview${imageUrls.length === 1 ? '' : 's'}. Click Upload to Roblox before asking Revro to implement it as UI. If automatic upload is not configured, download it and upload it manually.`,
           credits_used: cost,
           credits_remaining: creditResult.creditsRemaining,
         },
