@@ -1,6 +1,8 @@
 import { supabaseAdmin } from '@/lib/supabase';
 
-export const PLUGIN_LIVE_WINDOW_MS = 60_000;
+// Keep one source of truth for chat, settings, scripts, and playtest while
+// allowing brief Studio transitions during inserts and playtest startup.
+export const PLUGIN_LIVE_WINDOW_MS = 90_000;
 
 export type ActivePluginConnection = {
   session_id: string;

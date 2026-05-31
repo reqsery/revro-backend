@@ -11,6 +11,7 @@ const DISCORD_API = 'https://discord.com/api/v10';
 
 interface DiscordRole {
   name: string;
+  emoji?: string;
   color?: number;
   hoist?: boolean;
   mentionable?: boolean;
@@ -169,8 +170,8 @@ function normalizeRolePermissions(value: string | undefined): string {
 }
 
 function buildChannelOverwrites(guildId: string, roles: CreatedRole[], channel?: DiscordChannel): PermissionOverwrite[] {
-  const allowed = new Set((channel?.allowed_roles ?? []).map(normalizeName));
-  const denied = new Set((channel?.denied_roles ?? []).map(normalizeName));
+  const allowed = new Set((channel?.allowed_roles ?? []).map(normalizeRoleName));
+  const denied = new Set((channel?.denied_roles ?? []).map(normalizeRoleName));
   const isPrivate = allowed.size > 0;
   const isReadOnly = channel?.read_only === true;
 
@@ -178,12 +179,12 @@ function buildChannelOverwrites(guildId: string, roles: CreatedRole[], channel?:
     .map((role) => ({
       id: role.id,
       type: 0 as const,
-      allow: allowed.has(normalizeName(role.name))
+      allow: allowed.has(normalizeRoleName(role.name))
         ? String(MEMBER_CHANNEL_PERMISSIONS)
         : isPrivate
           ? '0'
           : getChannelPermissionBits(role.permissions),
-      deny: denied.has(normalizeName(role.name))
+      deny: denied.has(normalizeRoleName(role.name))
         ? String(MEMBER_CHANNEL_PERMISSIONS)
         : isReadOnly
           ? '2048'
@@ -239,6 +240,29 @@ function getChannelType(channel: DiscordChannel): number {
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
+}
+
+function roleEmoji(role: DiscordRole): string {
+  const normalized = normalizeName(role.name);
+  if (normalized.includes('admin')) return '🛡️';
+  if (normalized.includes('mod')) return '🔨';
+  if (normalized.includes('vip') || normalized.includes('premium')) return '⭐';
+  if (normalized.includes('member')) return '👤';
+  return role.emoji?.trim() ?? '';
+}
+
+function plainRoleName(name: string): string {
+  return name.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+}
+
+function displayRoleName(role: DiscordRole): string {
+  const emoji = roleEmoji(role);
+  const base = plainRoleName(role.name);
+  return emoji ? `${emoji} ${base}` : base;
+}
+
+function normalizeRoleName(name: string): string {
+  return normalizeName(plainRoleName(name));
 }
 
 function normalizeChannelName(name: string): string {
@@ -408,15 +432,29 @@ export async function POST(request: NextRequest) {
   for (const role of (plan.roles ?? [])) {
     try {
       const permissions = normalizeRolePermissions(role.permissions);
-      const existingRole = existingRoles.find(item => normalizeName(item.name) === normalizeName(role.name));
+      const desiredRoleName = displayRoleName(role);
+      const existingRole = existingRoles.find(item => normalizeRoleName(item.name) === normalizeRoleName(role.name));
       if (existingRole) {
         const patch: Record<string, unknown> = {};
+        if (existingRole.name !== desiredRoleName) patch.name = desiredRoleName;
         if (existingRole.permissions !== permissions) patch.permissions = permissions;
         if (role.color !== undefined) patch.color = role.color;
         if (role.hoist !== undefined) patch.hoist = role.hoist;
         if (role.mentionable !== undefined) patch.mentionable = role.mentionable;
         if (Object.keys(patch).length > 0) {
-          await discordRequest('PATCH', `/guilds/${guildId}/roles/${existingRole.id}`, patch);
+          try {
+            await discordRequest('PATCH', `/guilds/${guildId}/roles/${existingRole.id}`, patch);
+            existingRole.name = desiredRoleName;
+          } catch (err) {
+            if (!('name' in patch)) throw err;
+            delete patch.name;
+            const detail = `Role rename skipped for "${existingRole.name}": ${err instanceof Error ? err.message : String(err)}`;
+            result.skipped.push(detail);
+            console.warn('[Discord build] Role rename skipped', { role: existingRole.name, message: detail });
+            if (Object.keys(patch).length > 0) {
+              await discordRequest('PATCH', `/guilds/${guildId}/roles/${existingRole.id}`, patch);
+            }
+          }
           existingRole.permissions = permissions;
           result.rolesUpdated.push(existingRole.name);
           recordBuildStep('update_role', existingRole.name);
@@ -432,21 +470,35 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const created = await discordRequest('POST', `/guilds/${guildId}/roles`, {
-        name: role.name,
-        color: role.color ?? 0,
-        hoist: role.hoist ?? false,
-        mentionable: role.mentionable ?? false,
-        permissions,
-      });
+      let created: ExistingRole;
+      try {
+        created = await discordRequest('POST', `/guilds/${guildId}/roles`, {
+          name: desiredRoleName,
+          color: role.color ?? 0,
+          hoist: role.hoist ?? false,
+          mentionable: role.mentionable ?? false,
+          permissions,
+        });
+      } catch (err) {
+        const detail = `Role emoji prefix skipped for "${role.name}": ${err instanceof Error ? err.message : String(err)}`;
+        result.skipped.push(detail);
+        console.warn('[Discord build] Role emoji prefix skipped', { role: role.name, message: detail });
+        created = await discordRequest('POST', `/guilds/${guildId}/roles`, {
+          name: plainRoleName(role.name),
+          color: role.color ?? 0,
+          hoist: role.hoist ?? false,
+          mentionable: role.mentionable ?? false,
+          permissions,
+        });
+      }
       existingRoles.push(created);
       createdRoles.push({
         id: created.id,
-        name: role.name,
+        name: created.name,
         permissions,
       });
-      result.rolesCreated.push(role.name);
-      recordBuildStep('create_role', role.name);
+      result.rolesCreated.push(created.name);
+      recordBuildStep('create_role', created.name);
       await sleep(125); // rate limit safety
     } catch (err: any) {
       recordBuildError(result, `Role "${role.name}"`, err);
