@@ -74,6 +74,23 @@ function fallbackDiscordPlan(prompt: string) {
   return { roles, categories };
 }
 
+function buildStrictDiscordRetryPrompt(fullPrompt: string) {
+  return `${fullPrompt}
+
+The previous Discord server setup response was not buildable or did not match the user's request.
+Return a Discord server setup for the user's exact request, not a generic template.
+
+Requirements:
+- Preserve the user's requested server purpose, role names, channel names, paywall/access rules, and permission intent.
+- Return one short sentence, then exactly one valid JSON code block.
+- The JSON must include roles and categories with channels.
+- Use normal text channels for announcements, rules, forums, tickets, and community areas.
+- Include emoji fields, but keep channel names lowercase with hyphens.
+- Do not add unrelated generic channels unless the user asked for them.
+- Do not write a blueprint essay.
+- Do not return prose without JSON.`;
+}
+
 function compactExecutionSummary(value: string): string {
   const cleaned = value
     .replace(/\s+/g, ' ')
@@ -190,14 +207,7 @@ export async function POST(request: NextRequest) {
       ...getAIRoutingDebug('discord', fullPrompt, planModel),
       inputTokenEstimate: estimateInputTokens(fullPrompt, history),
     })
-    const aiResponse = await callAI(selection, fullPrompt, 'discord', history)
-
-    // Token-based billing — same model as Roblox routes, minimum 1 credit
-    const cost = estimateTokenCostUsd(
-      selection.actualModel,
-      aiResponse.usage?.input_tokens ?? 0,
-      aiResponse.usage?.output_tokens ?? 0,
-    )
+    let aiResponse = await callAI(selection, fullPrompt, 'discord', history)
 
     if (!aiResponse.content.trim()) {
       console.error('[Discord chat] Empty AI response', {
@@ -209,15 +219,41 @@ export async function POST(request: NextRequest) {
 
     let { explanation, config } = parseDiscordResponse(aiResponse.content)
     if (!config && looksLikeServerBuildRequest(prompt)) {
+      console.warn('[Discord chat] AI response missing buildable plan; retrying strict Discord setup', {
+        userId: user.id,
+        model: selection.actualModel,
+        promptLength: prompt.length,
+        responseLength: aiResponse.content.length,
+      })
+      const retryResponse = await callAI(selection, buildStrictDiscordRetryPrompt(fullPrompt), 'discord', history)
+      const retryParsed = parseDiscordResponse(retryResponse.content)
+      aiResponse = {
+        content: retryResponse.content,
+        usage: {
+          input_tokens: (aiResponse.usage?.input_tokens ?? 0) + (retryResponse.usage?.input_tokens ?? 0),
+          output_tokens: (aiResponse.usage?.output_tokens ?? 0) + (retryResponse.usage?.output_tokens ?? 0),
+          total_tokens: (aiResponse.usage?.total_tokens ?? 0) + (retryResponse.usage?.total_tokens ?? 0),
+        },
+      }
+      explanation = retryParsed.explanation
+      config = retryParsed.config
+    }
+
+    if (!config && looksLikeServerBuildRequest(prompt)) {
       config = fallbackDiscordPlan(prompt)
-      explanation = DISCORD_PLAN_FALLBACK
-      console.warn('[Discord chat] AI response missing buildable plan; using safe fallback plan', {
+      explanation = 'I could not extract the exact requested setup cleanly, so I generated a safe editable starter structure. Review it before building.'
+      console.warn('[Discord chat] Strict retry still missing plan; using safe fallback plan', {
         userId: user.id,
         model: selection.actualModel,
         promptLength: prompt.length,
         responseLength: aiResponse.content.length,
       })
     }
+    const cost = estimateTokenCostUsd(
+      selection.actualModel,
+      aiResponse.usage?.input_tokens ?? 0,
+      aiResponse.usage?.output_tokens ?? 0,
+    )
     const assistantContent = config
       ? `${explanation}\n\n\`\`\`json\n${JSON.stringify(config, null, 2)}\n\`\`\``
       : (aiResponse.content.trim() || explanation)
