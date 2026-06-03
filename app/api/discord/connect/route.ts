@@ -6,6 +6,12 @@ export const dynamic = 'force-dynamic';
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
+function json(data: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(data, init);
+  response.headers.set('Cache-Control', 'no-store, max-age=0');
+  return response;
+}
+
 /** POST /api/discord/connect — validate and save a Discord bot token */
 export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
@@ -15,7 +21,7 @@ export async function POST(request: NextRequest) {
   const token: string = (body.token ?? '').trim();
 
   if (!token) {
-    return NextResponse.json({ error: 'Bot token is required' }, { status: 400 });
+    return json({ error: 'Bot token is required' }, { status: 400 });
   }
 
   // Validate the token against Discord API
@@ -24,7 +30,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (!discordRes.ok) {
-    return NextResponse.json(
+    return json(
       { error: 'Invalid bot token — check your Discord developer portal' },
       { status: 400 }
     );
@@ -43,10 +49,10 @@ export async function POST(request: NextRequest) {
 
   if (updateErr) {
     console.error('[Discord connect] DB error:', updateErr.message);
-    return NextResponse.json({ error: 'Failed to save bot token' }, { status: 500 });
+    return json({ error: 'Failed to save bot token' }, { status: 500 });
   }
 
-  return NextResponse.json({
+  return json({
     success: true,
     bot: {
       id: botInfo.id,
@@ -71,7 +77,7 @@ export async function GET(request: NextRequest) {
 
   const token = userData?.discord_bot_token;
   if (!token) {
-    return NextResponse.json({ connected: false });
+    return json({ connected: false });
   }
 
   // Validate the token is still valid
@@ -85,11 +91,11 @@ export async function GET(request: NextRequest) {
       .from('users')
       .update({ discord_bot_token: null })
       .eq('id', user.id);
-    return NextResponse.json({ connected: false });
+    return json({ connected: false });
   }
 
   const botInfo: any = await discordRes.json();
-  return NextResponse.json({
+  return json({
     connected: true,
     bot: {
       id: botInfo.id,
@@ -111,5 +117,5 @@ export async function DELETE(request: NextRequest) {
     .update({ discord_bot_token: null, updated_at: new Date().toISOString() })
     .eq('id', user.id);
 
-  return NextResponse.json({ success: true });
+  return json({ success: true });
 }
