@@ -22,7 +22,161 @@ function looksLikeServerBuildRequest(prompt: string) {
     .test(prompt);
 }
 
+function cleanDiscordName(value: string) {
+  return value
+    .replace(/<@!?\d+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^#+/, '')
+    .replace(/[.,;:]+$/g, '');
+}
+
+function normalizeDiscordName(value: string) {
+  return cleanDiscordName(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+function isVoiceChannel(categoryName: string, channelName: string) {
+  return /\b(voice|call|duo|trio|vc)\b/i.test(`${categoryName} ${channelName}`);
+}
+
+function channelTopic(name: string) {
+  const normalized = normalizeDiscordName(name);
+  if (normalized.includes('rules')) return 'Server rules and guidelines';
+  if (normalized.includes('announcement')) return 'Important announcements and updates';
+  if (normalized.includes('prices')) return 'Prices for boosting and account services';
+  if (normalized.includes('vouches')) return 'Customer vouches and proof';
+  if (normalized.includes('global-chat')) return 'Main community chat';
+  if (normalized.includes('german-chat')) return 'German community chat';
+  if (normalized.includes('buy-accounts')) return 'Account purchase requests';
+  if (normalized.includes('sell-accounts')) return 'Account selling requests';
+  if (normalized.includes('account-info')) return 'Account rules, safety notes, and service info';
+  if (normalized.includes('ranked-boost')) return 'Ranked boosting orders and questions';
+  if (normalized.includes('trophy-push')) return 'Trophy pushing service requests';
+  if (normalized.includes('win-streak')) return 'Win streak service requests';
+  if (normalized.includes('play-with-us')) return 'Queue to play with staff or boosters';
+  if (normalized.includes('orders')) return 'Order updates and service tracking';
+  if (normalized.includes('ticket')) return 'Support ticket area';
+  return undefined;
+}
+
+function roleDefinition(name: string, emoji?: string) {
+  const normalized = normalizeDiscordName(name);
+  const base = cleanDiscordName(name);
+  const roleEmoji = emoji || (
+    normalized.includes('owner') ? '👑'
+    : normalized.includes('admin') ? '🛡️'
+    : normalized.includes('staff') || normalized.includes('mod') ? '🔨'
+    : normalized.includes('booster') ? '🚀'
+    : normalized.includes('pusher') ? '🏆'
+    : normalized.includes('customer') ? '💎'
+    : normalized.includes('verified') ? '✅'
+    : normalized.includes('member') ? '🎮'
+    : '👤'
+  );
+
+  const permissions = normalized.includes('owner') || normalized.includes('admin')
+    ? '11264'
+    : normalized.includes('staff') || normalized.includes('mod')
+      ? '11270'
+      : '3072';
+
+  return {
+    name: base,
+    emoji: roleEmoji,
+    color: normalized.includes('owner') ? 15844367
+      : normalized.includes('admin') ? 15158332
+      : normalized.includes('staff') || normalized.includes('mod') ? 3447003
+      : normalized.includes('customer') ? 10181046
+      : normalized.includes('verified') ? 3066993
+      : 0,
+    hoist: /owner|admin|staff|booster|pusher/i.test(normalized),
+    mentionable: /staff|booster|pusher/i.test(normalized),
+    permissions,
+  };
+}
+
+function extractDiscordStructureFromPrompt(prompt: string) {
+  const structuredText = prompt
+    .split(/\b(help me|think of|it's for|its for|for a server)\b/i)[0]
+    .replace(/<@!?\d+>/g, ' ')
+    .trim();
+  if (!structuredText.includes('\u30fb') && !structuredText.includes('\u250a') && !structuredText.includes('|')) {
+    return null;
+  }
+
+  const categories: any[] = [];
+  const roles: any[] = [];
+  let currentCategory: any | null = null;
+  let parsingRoles = false;
+  const tokenRegex = /(?:^|\s)([^\s\u30fb\u250a|]+)([\u30fb\u250a|])\s*([\s\S]*?)(?=\s+[^\s\u30fb\u250a|]+[\u30fb\u250a|]|$)/gu;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(structuredText)) !== null) {
+    const marker = match[1].trim();
+    const separator = match[2];
+    const name = cleanDiscordName(match[3]);
+    if (!name) continue;
+
+    if (separator === '\u30fb') {
+      parsingRoles = /\broles?\b/i.test(name);
+      currentCategory = parsingRoles
+        ? null
+        : { name: name.toUpperCase(), emoji: marker, channels: [] as any[] };
+      if (currentCategory) categories.push(currentCategory);
+      continue;
+    }
+
+    if (parsingRoles) {
+      roles.push(roleDefinition(name, marker));
+      continue;
+    }
+
+    if (!currentCategory) continue;
+    const channelName = normalizeDiscordName(name);
+    if (!channelName) continue;
+    const privateStaff = /\b(staff|owner|admin)\b/i.test(channelName);
+    const privateCustomer = /\b(customer|orders?)\b/i.test(channelName);
+    currentCategory.channels.push({
+      name: channelName,
+      type: isVoiceChannel(currentCategory.name, channelName) ? 'voice' : 'text',
+      emoji: marker,
+      topic: channelTopic(channelName),
+      ...(privateStaff ? { allowed_roles: ['Owner', 'Admin', 'Staff'] } : {}),
+      ...(privateCustomer ? { allowed_roles: ['Owner', 'Admin', 'Staff', 'Customer'] } : {}),
+      ...(/\b(rules|announcements|prices|vouches|account-info)\b/i.test(channelName) ? { read_only: true } : {}),
+    });
+  }
+
+  const usableCategories = categories.filter(category => category.channels.length > 0);
+  if (usableCategories.length === 0) return null;
+
+  const dedupedRoles = new Map<string, any>();
+  for (const role of roles.length ? roles : [
+    roleDefinition('Owner', '👑'),
+    roleDefinition('Admin', '🛡️'),
+    roleDefinition('Staff', '🔨'),
+    roleDefinition('Customer', '💎'),
+    roleDefinition('Verified', '✅'),
+    roleDefinition('Member', '🎮'),
+  ]) {
+    dedupedRoles.set(normalizeDiscordName(role.name), role);
+  }
+
+  return {
+    roles: Array.from(dedupedRoles.values()),
+    categories: usableCategories,
+  };
+}
+
 function fallbackDiscordPlan(prompt: string) {
+  const extracted = extractDiscordStructureFromPrompt(prompt);
+  if (extracted) return extracted;
+
   const lower = prompt.toLowerCase();
   const wantsVip = /\b(vip|paid|client|customer|premium|buyer|private)\b/i.test(lower);
   const wantsSupport = /\b(support|ticket|help|staff)\b/i.test(lower);
@@ -240,13 +394,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (!config && looksLikeServerBuildRequest(prompt)) {
-      config = fallbackDiscordPlan(prompt)
-      explanation = 'I could not extract the exact requested setup cleanly, so I generated a safe editable starter structure. Review it before building.'
+      const extractedPlan = extractDiscordStructureFromPrompt(prompt)
+      config = extractedPlan ?? fallbackDiscordPlan(prompt)
+      explanation = extractedPlan
+        ? 'I extracted the server structure you pasted and mapped it into a safe build plan with roles, channels, and basic permissions. Review it before building.'
+        : 'I could not extract the exact requested setup cleanly, so I generated a safe editable starter structure. Review it before building.'
       console.warn('[Discord chat] Strict retry still missing plan; using safe fallback plan', {
         userId: user.id,
         model: selection.actualModel,
         promptLength: prompt.length,
         responseLength: aiResponse.content.length,
+        extractedStructure: !!extractedPlan,
       })
     }
     const cost = estimateTokenCostUsd(
