@@ -23,6 +23,19 @@ interface DiscordGuildRaw {
   permissions: string; // bitfield as string
 }
 
+function canManageGuild(guild: DiscordGuildRaw) {
+  if (guild.owner) return true;
+  try {
+    const permissions = BigInt(guild.permissions);
+    const adminBit = BigInt(0x8);
+    const manageGuildBit = BigInt(0x20);
+    return (permissions & adminBit) === adminBit
+      || (permissions & manageGuildBit) === manageGuildBit;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * POST /api/discord/exchange
  * Body: { code: string }
@@ -82,23 +95,15 @@ export async function POST(request: NextRequest) {
 
   const allGuilds: DiscordGuildRaw[] = await guildsRes.json();
 
-  // Filter to servers where the user is owner, Administrator, or has Manage Server.
-  const ADMIN_BIT = BigInt(0x8);
-  const MANAGE_GUILD_BIT = BigInt(0x20);
-  const manageableGuilds = allGuilds.filter(g => {
-    if (g.owner) return true;
-    try {
-      const permissions = BigInt(g.permissions);
-      return (permissions & ADMIN_BIT) === ADMIN_BIT
-        || (permissions & MANAGE_GUILD_BIT) === MANAGE_GUILD_BIT;
-    } catch { return false; }
-  });
-
-  const guildsForProfile = manageableGuilds.map(g => ({
+  const guildsForProfile = allGuilds.map(g => ({
     id: g.id,
     name: g.name,
     icon: g.icon,
+    owner: g.owner,
+    permissions: g.permissions,
+    manageable: canManageGuild(g),
   }));
+  const manageableGuilds = guildsForProfile.filter(g => g.manageable);
 
   // ── 3. Fetch Discord user info to store their Discord user ID ──────────────
   let discordUserId: string | null = null;
@@ -134,11 +139,13 @@ export async function POST(request: NextRequest) {
     discordUserId,
     totalGuilds: allGuilds.length,
     manageableGuilds: manageableGuilds.length,
+    storedGuilds: guildsForProfile.length,
   });
 
   return json({
     ok:          true,
-    guildsFound: manageableGuilds.length,
+    guildsFound: guildsForProfile.length,
     guildIds: guildsForProfile.map(g => g.id),
+    manageableGuilds: manageableGuilds.length,
   });
 }

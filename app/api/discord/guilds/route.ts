@@ -17,6 +17,9 @@ type StoredGuild = {
   id: string;
   name?: string;
   icon?: string | null;
+  owner?: boolean;
+  permissions?: string;
+  manageable?: boolean;
 };
 
 function json(data: unknown, init?: ResponseInit) {
@@ -39,8 +42,24 @@ function normalizeStoredGuilds(value: unknown): StoredGuild[] {
           id: typeof guild?.id === 'string' ? guild.id : '',
           name: typeof guild?.name === 'string' ? guild.name : undefined,
           icon: typeof guild?.icon === 'string' ? guild.icon : null,
+          owner: typeof guild?.owner === 'boolean' ? guild.owner : undefined,
+          permissions: typeof guild?.permissions === 'string' ? guild.permissions : undefined,
+          manageable: typeof guild?.manageable === 'boolean' ? guild.manageable : undefined,
         })
     .filter((guild: StoredGuild) => guild.id);
+}
+
+function hasManagePermission(guild: StoredGuild) {
+  if (guild.manageable === true || guild.owner === true) return true;
+  try {
+    const permissions = BigInt(guild.permissions ?? '0');
+    const adminBit = BigInt(0x8);
+    const manageGuildBit = BigInt(0x20);
+    return (permissions & adminBit) === adminBit
+      || (permissions & manageGuildBit) === manageGuildBit;
+  } catch {
+    return false;
+  }
 }
 
 async function fetchBotGuilds(token: string): Promise<BotGuild[]> {
@@ -185,8 +204,11 @@ export async function GET(request: NextRequest) {
     return json({ guilds: [], connected: false, savedGuildId: null });
   }
 
-  const guilds = storedGuilds.map(storedGuild => {
+  const guilds = storedGuilds
+    .map(storedGuild => {
     const botGuild = botGuildMap.get(storedGuild.id);
+    const manageable = hasManagePermission(storedGuild);
+    if (!manageable && !botGuild) return null;
     return {
       id:          storedGuild.id,
       name:        botGuild?.name ?? storedGuild.name ?? `Server ${storedGuild.id}`,
@@ -194,8 +216,27 @@ export async function GET(request: NextRequest) {
         ?? (storedGuild.icon ? `https://cdn.discordapp.com/icons/${storedGuild.id}/${storedGuild.icon}.png` : null),
       memberCount: botGuild?.memberCount ?? null,
       botPresent:  botGuildMap.has(storedGuild.id),
+      manageable,
     };
-  });
+  })
+  .filter((guild): guild is NonNullable<typeof guild> => Boolean(guild));
+
+  if (guilds.length === 0 && discordUserId) {
+    console.info('[Discord/guilds] Listed', {
+      userId: user.id,
+      connected: true,
+      source: 'oauth_no_usable_guilds',
+      storedGuilds: storedGuilds.length,
+      botGuilds: botGuildMap.size,
+      savedGuildId: null,
+    });
+    return json({
+      guilds: [],
+      connected: true,
+      savedGuildId: null,
+      reason: 'no_usable_guilds',
+    });
+  }
 
   const savedGuildStillValid = savedGuildId ? guilds.some(guild => guild.id === savedGuildId) : true;
   if (!savedGuildStillValid) {
@@ -225,6 +266,7 @@ export async function GET(request: NextRequest) {
     connected: true,
     storedGuilds: storedGuilds.length,
     botGuilds: botGuildMap.size,
+    returnedGuilds: guilds.length,
     savedGuildId,
   });
 
@@ -253,19 +295,30 @@ export async function POST(request: NextRequest) {
     if (readError) throw readError;
 
     const storedGuilds = data?.discord_guild_ids ? normalizeStoredGuilds(data.discord_guild_ids) : [];
-    let guildAllowed = storedGuilds.some(guild => guild.id === guild_id);
-    if (!guildAllowed && data?.discord_bot_token) {
+    const allowedBotGuildIds = new Set<string>();
+    const botTokens = [
+      data?.discord_bot_token,
+      configuredGlobalBotToken(),
+    ].filter((token, index, arr) =>
+      typeof token === 'string' && token && arr.findIndex(other => other === token) === index
+    ) as string[];
+
+    for (const botToken of botTokens) {
       try {
-        const botGuilds = await fetchBotGuilds(data.discord_bot_token);
-        guildAllowed = botGuilds.some(guild => guild.id === guild_id);
+        const botGuilds = await fetchBotGuilds(botToken);
+        for (const guild of botGuilds) allowedBotGuildIds.add(guild.id);
       } catch (error) {
-        console.warn('[Discord/guilds] User bot guild validation failed', {
+        console.warn('[Discord/guilds] Bot guild validation failed', {
           userId: user.id,
           guildId: guild_id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
+
+    const guildAllowed = storedGuilds.some(guild =>
+      guild.id === guild_id && (hasManagePermission(guild) || allowedBotGuildIds.has(guild.id))
+    ) || allowedBotGuildIds.has(guild_id);
 
     if (!guildAllowed) {
       console.warn('[Discord/guilds] Save rejected for unknown guild', {
