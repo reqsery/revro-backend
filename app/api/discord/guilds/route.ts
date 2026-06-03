@@ -57,6 +57,13 @@ async function fetchBotGuilds(token: string): Promise<BotGuild[]> {
   }));
 }
 
+function configuredGlobalBotToken() {
+  return process.env.DISCORD_BOT_TOKEN
+    || process.env.BOT_TOKEN
+    || process.env.DISCORD_TOKEN
+    || null;
+}
+
 /**
  * GET /api/discord/guilds
  *
@@ -95,18 +102,28 @@ export async function GET(request: NextRequest) {
   }
 
   // Try to get bot guild data for enrichment (soft-fail — works without it)
-  const botToken = userBotToken
-    || process.env.DISCORD_BOT_TOKEN
-    || process.env.BOT_TOKEN
-    || process.env.DISCORD_TOKEN;
-
   const botGuildMap = new Map<string, BotGuild>();
-  if (botToken) {
+  const userBotGuildMap = new Map<string, BotGuild>();
+  const botTokens = [
+    { source: 'user_bot_token', token: userBotToken },
+    { source: 'global_bot_token', token: configuredGlobalBotToken() },
+  ].filter((item, index, arr) =>
+    item.token && arr.findIndex(other => other.token === item.token) === index
+  ) as Array<{ source: string; token: string }>;
+
+  for (const botToken of botTokens) {
     try {
-      const botGuilds = await fetchBotGuilds(botToken);
-      for (const g of botGuilds) botGuildMap.set(g.id, g);
+      const botGuilds = await fetchBotGuilds(botToken.token);
+      for (const g of botGuilds) {
+        botGuildMap.set(g.id, g);
+        if (botToken.source === 'user_bot_token') userBotGuildMap.set(g.id, g);
+      }
     } catch (e) {
-      console.warn('[Discord guilds] Bot guild fetch failed:', e);
+      console.warn('[Discord/guilds] Bot guild fetch failed', {
+        source: botToken.source,
+        userId: user.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
@@ -114,8 +131,8 @@ export async function GET(request: NextRequest) {
   // If the user connected a personal bot token but has not completed OAuth yet,
   // use that token as a live DB-backed source so Settings and Chat agree.
   // Do not expose the global bot guild list as a fallback for users without OAuth.
-  if ((!storedGuilds || storedGuilds.length === 0) && userBotToken && botGuildMap.size > 0) {
-    const guilds = Array.from(botGuildMap.values()).map(guild => ({
+  if ((!storedGuilds || storedGuilds.length === 0) && userBotToken && userBotGuildMap.size > 0) {
+    const guilds = Array.from(userBotGuildMap.values()).map(guild => ({
       ...guild,
       botPresent: true,
     }));
@@ -132,7 +149,7 @@ export async function GET(request: NextRequest) {
       connected: true,
       source: 'user_bot_token',
       storedGuilds: 0,
-      botGuilds: botGuildMap.size,
+      botGuilds: userBotGuildMap.size,
       savedGuildId,
     });
     return json({ guilds, connected: true, savedGuildId });

@@ -82,14 +82,19 @@ export async function POST(request: NextRequest) {
 
   const allGuilds: DiscordGuildRaw[] = await guildsRes.json();
 
-  // Filter to servers where the user is owner OR has Administrator bit (0x8)
+  // Filter to servers where the user is owner, Administrator, or has Manage Server.
   const ADMIN_BIT = BigInt(0x8);
-  const adminGuilds = allGuilds.filter(g => {
+  const MANAGE_GUILD_BIT = BigInt(0x20);
+  const manageableGuilds = allGuilds.filter(g => {
     if (g.owner) return true;
-    try { return (BigInt(g.permissions) & ADMIN_BIT) === ADMIN_BIT; } catch { return false; }
+    try {
+      const permissions = BigInt(g.permissions);
+      return (permissions & ADMIN_BIT) === ADMIN_BIT
+        || (permissions & MANAGE_GUILD_BIT) === MANAGE_GUILD_BIT;
+    } catch { return false; }
   });
 
-  const guildsForProfile = adminGuilds.map(g => ({
+  const guildsForProfile = manageableGuilds.map(g => ({
     id: g.id,
     name: g.name,
     icon: g.icon,
@@ -128,12 +133,12 @@ export async function POST(request: NextRequest) {
     userId: user.id,
     discordUserId,
     totalGuilds: allGuilds.length,
-    adminGuilds: adminGuilds.length,
+    manageableGuilds: manageableGuilds.length,
   });
 
   return json({
     ok:          true,
-    guildsFound: adminGuilds.length,
+    guildsFound: manageableGuilds.length,
     guildIds: guildsForProfile.map(g => g.id),
   });
 }
