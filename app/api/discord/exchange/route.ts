@@ -9,6 +9,12 @@ const CLIENT_ID    = process.env.DISCORD_CLIENT_ID    || '1477250434967011349';
 const REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'https://revro.dev/auth/discord/callback';
 const DISCORD_API   = 'https://discord.com/api/v10';
 
+function json(data: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(data, init);
+  response.headers.set('Cache-Control', 'no-store, max-age=0');
+  return response;
+}
+
 interface DiscordGuildRaw {
   id: string;
   name: string;
@@ -27,13 +33,20 @@ export async function POST(request: NextRequest) {
   const user = await requireAuth(request);
   if (user instanceof NextResponse) return user;
 
-  const { code } = await request.json();
-  if (!code) return NextResponse.json({ error: 'code is required' }, { status: 400 });
+  const { code, state } = await request.json();
+  if (!code) return json({ error: 'code is required' }, { status: 400 });
+  if (state && state !== user.id) {
+    console.warn('[Discord exchange] State/user mismatch', {
+      authenticatedUserId: user.id,
+      stateUserId: state,
+    });
+    return json({ error: 'Discord connection was started from another Revro session. Sign in again and retry.' }, { status: 409 });
+  }
 
   const clientSecret = process.env.DISCORD_CLIENT_SECRET || process.env.DISCORD_SECRET;
   if (!clientSecret) {
     console.error('[Discord exchange] DISCORD_CLIENT_SECRET env var is not set. Add it in Vercel → Backend project → Settings → Environment Variables');
-    return NextResponse.json({ error: 'Discord integration is not configured. Contact support.' }, { status: 503 });
+    return json({ error: 'Discord integration is not configured. Contact support.' }, { status: 503 });
   }
 
   // ── 1. Exchange code for access token ─────────────────────────────────────
@@ -53,7 +66,7 @@ export async function POST(request: NextRequest) {
     const err = await tokenRes.json().catch(() => ({}));
     console.error('[Discord exchange] Token error:', JSON.stringify(err));
     const msg = (err.error_description as string) || (err.error as string) || 'Failed to exchange Discord code';
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return json({ error: msg }, { status: 400 });
   }
 
   const { access_token } = await tokenRes.json();
@@ -64,7 +77,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (!guildsRes.ok) {
-    return NextResponse.json({ error: 'Failed to fetch Discord guilds' }, { status: 502 });
+    return json({ error: 'Failed to fetch Discord guilds' }, { status: 502 });
   }
 
   const allGuilds: DiscordGuildRaw[] = await guildsRes.json();
@@ -106,12 +119,19 @@ export async function POST(request: NextRequest) {
 
   if (discordUpdateErr) {
     console.error('[Discord exchange] Failed to save guild IDs:', discordUpdateErr.message);
-    return NextResponse.json({
+    return json({
       error: `Discord connection failed — missing DB columns. Run the discord migration SQL in Supabase. Details: ${discordUpdateErr.message}`,
     }, { status: 500 });
   }
 
-  return NextResponse.json({
+  console.info('[Discord exchange] Connected account', {
+    userId: user.id,
+    discordUserId,
+    totalGuilds: allGuilds.length,
+    adminGuilds: adminGuilds.length,
+  });
+
+  return json({
     ok:          true,
     guildsFound: adminGuilds.length,
     guildIds: guildsForProfile.map(g => g.id),

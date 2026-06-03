@@ -6,6 +6,12 @@ export const dynamic = 'force-dynamic';
 const CLIENT_ID    = process.env.DISCORD_CLIENT_ID    || '1477250434967011349';
 const REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'https://revro.dev/auth/discord/callback';
 
+function json(data: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(data, init);
+  response.headers.set('Cache-Control', 'no-store, max-age=0');
+  return response;
+}
+
 /**
  * GET /api/discord/auth
  * Returns the Discord OAuth URL for the user to visit.
@@ -24,7 +30,7 @@ export async function GET(request: NextRequest) {
     state:         user.id, // passed back in callback so we know which Revro user this is
   });
 
-  return NextResponse.json({
+  return json({
     url: `https://discord.com/oauth2/authorize?${params.toString()}`,
   });
 }

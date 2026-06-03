@@ -72,11 +72,12 @@ export async function GET(request: NextRequest) {
   let storedGuilds: StoredGuild[] | null = null;
   let savedGuildId:   string | null = null;
   let userBotToken:   string | null = null;
+  let discordUserId:  string | null = null;
 
   try {
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('discord_guild_ids, discord_guild_id, discord_bot_token')
+      .select('discord_guild_ids, discord_guild_id, discord_bot_token, discord_user_id')
       .eq('id', user.id)
       .single();
 
@@ -84,6 +85,7 @@ export async function GET(request: NextRequest) {
     storedGuilds = data?.discord_guild_ids ? normalizeStoredGuilds(data.discord_guild_ids) : [];
     savedGuildId   = data?.discord_guild_id ?? null;
     userBotToken   = data?.discord_bot_token ?? null;
+    discordUserId  = data?.discord_user_id ?? null;
   } catch (error) {
     console.warn('[Discord/guilds] List failed', {
       userId: user.id,
@@ -134,6 +136,24 @@ export async function GET(request: NextRequest) {
       savedGuildId,
     });
     return json({ guilds, connected: true, savedGuildId });
+  }
+
+  // Discord OAuth is linked, but this account has no admin/owner guilds.
+  if ((!storedGuilds || storedGuilds.length === 0) && discordUserId) {
+    console.info('[Discord/guilds] Listed', {
+      userId: user.id,
+      connected: true,
+      source: 'oauth_no_admin_guilds',
+      storedGuilds: 0,
+      botGuilds: 0,
+      savedGuildId: null,
+    });
+    return json({
+      guilds: [],
+      connected: true,
+      savedGuildId: null,
+      reason: 'no_admin_guilds',
+    });
   }
 
   // User hasn't connected Discord OAuth or a personal bot token.
