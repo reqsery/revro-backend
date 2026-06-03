@@ -17,6 +17,63 @@ function getConversationId(value: unknown): string | undefined {
 const DISCORD_PLAN_FALLBACK = 'I planned the Discord server structure. Review it below before building it.'
 const DISCORD_REPLY_FALLBACK = 'I could not finish that Discord server plan cleanly. Send the setup request again and I will rebuild it.'
 
+function looksLikeServerBuildRequest(prompt: string) {
+  return /\b(set\s*up|setup|create|make|build|configure|server|roles?|channels?|category|categories|community|vip|support|rules|announcements?)\b/i
+    .test(prompt);
+}
+
+function fallbackDiscordPlan(prompt: string) {
+  const lower = prompt.toLowerCase();
+  const wantsVip = /\b(vip|paid|client|customer|premium|buyer|private)\b/i.test(lower);
+  const wantsSupport = /\b(support|ticket|help|staff)\b/i.test(lower);
+  const wantsGame = /\b(roblox|game|studio|developer|dev|release|update)\b/i.test(lower);
+
+  const roles = [
+    { name: 'Admin', emoji: '🛡️', color: 15158332, hoist: true, mentionable: false, permissions: '11264' },
+    { name: 'Moderator', emoji: '🔨', color: 3447003, hoist: true, mentionable: true, permissions: '11270' },
+    { name: 'Member', emoji: '👤', color: 3066993, hoist: false, mentionable: false, permissions: '3072' },
+    ...(wantsVip ? [{ name: 'VIP', emoji: '⭐', color: 15844367, hoist: true, mentionable: false, permissions: '3072' }] : []),
+  ];
+
+  const categories = [
+    {
+      name: 'INFORMATION',
+      emoji: '📢',
+      channels: [
+        { name: 'rules', type: 'text', emoji: '📜', topic: 'Server rules and guidelines', read_only: true },
+        { name: 'announcements', type: 'text', emoji: '📢', topic: 'Important announcements and updates', read_only: true },
+      ],
+    },
+    {
+      name: wantsGame ? 'GAME CHAT' : 'COMMUNITY',
+      emoji: '💬',
+      channels: [
+        { name: 'general', type: 'text', emoji: '💬', topic: 'General community chat' },
+        { name: wantsGame ? 'game-updates' : 'media', type: 'text', emoji: wantsGame ? '🧩' : '📸', topic: wantsGame ? 'Game updates and changelogs' : 'Share community media' },
+        { name: 'voice-chat', type: 'voice', emoji: '🔊' },
+      ],
+    },
+    ...(wantsSupport ? [{
+      name: 'SUPPORT',
+      emoji: '🎫',
+      channels: [
+        { name: 'support', type: 'text', emoji: '🎫', topic: 'Ask for help from staff' },
+        { name: 'staff-chat', type: 'text', emoji: '🔒', topic: 'Private staff coordination', allowed_roles: ['Admin', 'Moderator'] },
+      ],
+    }] : []),
+    ...(wantsVip ? [{
+      name: 'VIP',
+      emoji: '🏆',
+      channels: [
+        { name: 'vip-chat', type: 'text', emoji: '🏆', topic: 'Private VIP chat', allowed_roles: ['VIP'] },
+        { name: 'vip-announcements', type: 'text', emoji: '⭐', topic: 'VIP-only updates', allowed_roles: ['VIP'], read_only: true },
+      ],
+    }] : []),
+  ];
+
+  return { roles, categories };
+}
+
 function compactExecutionSummary(value: string): string {
   const cleaned = value
     .replace(/\s+/g, ' ')
@@ -150,7 +207,20 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const { explanation, config } = parseDiscordResponse(aiResponse.content)
+    let { explanation, config } = parseDiscordResponse(aiResponse.content)
+    if (!config && looksLikeServerBuildRequest(prompt)) {
+      config = fallbackDiscordPlan(prompt)
+      explanation = DISCORD_PLAN_FALLBACK
+      console.warn('[Discord chat] AI response missing buildable plan; using safe fallback plan', {
+        userId: user.id,
+        model: selection.actualModel,
+        promptLength: prompt.length,
+        responseLength: aiResponse.content.length,
+      })
+    }
+    const assistantContent = config
+      ? `${explanation}\n\n\`\`\`json\n${JSON.stringify(config, null, 2)}\n\`\`\``
+      : (aiResponse.content.trim() || explanation)
 
     // Save / create conversation
     let convId = conversationId
@@ -184,7 +254,7 @@ export async function POST(request: NextRequest) {
         .insert({
           conversation_id: convId,
           role: 'assistant',
-          content: aiResponse.content.trim() || explanation,
+          content: assistantContent,
           credits_cost: Math.ceil(cost),
           model_used: planModel,
         })
