@@ -102,12 +102,13 @@ function roleDefinition(name: string, emoji?: string) {
 
 function extractDiscordStructureFromPrompt(prompt: string) {
   const structuredText = prompt
+    .split(/\bRevro\s+Discord Builder\b/i)[0]
     .split(/\b(help me|think of|it's for|its for|for a server)\b/i)[0]
     .replace(/<@!?\d+>/g, ' ')
     .trim();
-  if (!structuredText.includes('\u30fb') && !structuredText.includes('\u250a') && !structuredText.includes('|')) {
-    return null;
-  }
+  const explicitPlan = extractPlainDiscordStructure(structuredText);
+  if (explicitPlan) return explicitPlan;
+  if (!structuredText.includes('\u30fb') && !structuredText.includes('\u250a') && !structuredText.includes('|')) return null;
 
   const categories: any[] = [];
   const roles: any[] = [];
@@ -171,6 +172,61 @@ function extractDiscordStructureFromPrompt(prompt: string) {
     roles: Array.from(dedupedRoles.values()),
     categories: usableCategories,
   };
+}
+
+function extractPlainDiscordStructure(prompt: string) {
+  const structureMatch = prompt.match(/CHANNEL STRUCTURE:\s*([\s\S]*?)(?:ROLE PERMISSIONS:|CATEGORY PERMISSIONS|IMPORTANT BOT NOTES|IMPORTANT RULES|$)/i);
+  if (!structureMatch) return null;
+
+  const structure = structureMatch[1]
+    .replace(/<@!?\d+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const categoryRegex = /(?:^|\s)(?:[^\w#]{1,20}\s*)?([A-Z][A-Z0-9 ]{2,})(?=\s+#)\s+((?:#\s*[a-z0-9-]+(?:\s+|$))+)/g;
+  const categories: any[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = categoryRegex.exec(structure)) !== null) {
+    const categoryName = cleanDiscordName(match[1]);
+    const channelMatches = Array.from(match[2].matchAll(/#\s*([a-z0-9-]+)/gi));
+    const channels = channelMatches
+      .map(channelMatch => normalizeDiscordName(channelMatch[1]))
+      .filter(Boolean)
+      .map(channelName => {
+        const privateStaff = /\b(staff|logs?)\b/i.test(channelName);
+        const privateCustomer = /\b(orders?)\b/i.test(channelName);
+        const readOnly = /\b(rules|announcements|prices|proofs|account-info|ranked-boost|trophy-push|prestige|accounts)\b/i.test(channelName);
+        return {
+          name: channelName,
+          type: isVoiceChannel(categoryName, channelName) ? 'voice' : 'text',
+          topic: channelTopic(channelName),
+          ...(privateStaff ? { allowed_roles: ['Owner', 'Admin', 'Staff'] } : {}),
+          ...(privateCustomer ? { allowed_roles: ['Owner', 'Admin', 'Staff', 'Customer'] } : {}),
+          ...(readOnly ? { read_only: true } : {}),
+        };
+      });
+
+    if (channels.length > 0) {
+      categories.push({
+        name: categoryName.toUpperCase(),
+        channels,
+      });
+    }
+  }
+
+  if (categories.length === 0) return null;
+
+  const rolesText = prompt.match(/ROLES:\s*([\s\S]*?)(?:CHANNEL STRUCTURE:|ROLE PERMISSIONS:|$)/i)?.[1] ?? '';
+  const explicitRoles = rolesText
+    .split(/\s+/)
+    .map(cleanDiscordName)
+    .filter(name => /^(Owner|Admin|Staff|Booster|Member|Bots?|Customer|Verified|Pusher)$/i.test(name))
+    .map(name => roleDefinition(name));
+  const roles = explicitRoles.length > 0
+    ? explicitRoles
+    : ['Owner', 'Admin', 'Staff', 'Booster', 'Member', 'Bots'].map(name => roleDefinition(name));
+
+  return { roles, categories };
 }
 
 function fallbackDiscordPlan(prompt: string) {
@@ -371,7 +427,18 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    const directStructurePlan = extractDiscordStructureFromPrompt(prompt)
     let { explanation, config } = parseDiscordResponse(aiResponse.content)
+    if (directStructurePlan) {
+      config = directStructurePlan
+      explanation = 'I extracted the server structure you pasted and mapped it into a safe build plan with roles, channels, and basic permissions. Review it before building.'
+      console.info('[Discord chat] Using extracted pasted server structure over AI plan', {
+        userId: user.id,
+        categories: directStructurePlan.categories?.length ?? 0,
+        roles: directStructurePlan.roles?.length ?? 0,
+      })
+    }
+
     if (!config && looksLikeServerBuildRequest(prompt)) {
       console.warn('[Discord chat] AI response missing buildable plan; retrying strict Discord setup', {
         userId: user.id,
@@ -394,7 +461,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!config && looksLikeServerBuildRequest(prompt)) {
-      const extractedPlan = extractDiscordStructureFromPrompt(prompt)
+      const extractedPlan = directStructurePlan ?? extractDiscordStructureFromPrompt(prompt)
       config = extractedPlan ?? fallbackDiscordPlan(prompt)
       explanation = extractedPlan
         ? 'I extracted the server structure you pasted and mapped it into a safe build plan with roles, channels, and basic permissions. Review it before building.'
